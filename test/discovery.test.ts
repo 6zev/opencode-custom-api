@@ -24,7 +24,9 @@ describe("discovery", () => {
 
   it("sets protocol auth headers without persisting credentials", () => {
     process.env.TEST_KEY = "secret"
-    expect(resolveHeaders(endpoint({ apiKey: { env: "TEST_KEY" } })).Authorization).toBe("Bearer secret")
+    const openai = resolveHeaders(endpoint({ apiKey: { env: "TEST_KEY" } }))
+    expect(openai.Authorization).toBe("Bearer secret")
+    expect(openai["User-Agent"]).toBe("opencode-custom-api")
     const anthropic = resolveHeaders(endpoint({ protocol: "anthropic-compatible", apiKey: { env: "TEST_KEY" } }))
     expect(anthropic["x-api-key"]).toBe("secret")
     expect(anthropic["anthropic-version"]).toBe("2023-06-01")

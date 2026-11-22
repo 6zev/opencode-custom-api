@@ -8,7 +8,7 @@ export function discoveryURLs(baseURL: string): string[] {
 }
 
 export function resolveHeaders(endpoint: EndpointOptions, credential?: string): Record<string, string> {
-  const result: Record<string, string> = { Accept: "application/json" }
+  const result: Record<string, string> = { Accept: "application/json", "User-Agent": "opencode-custom-api" }
   for (const [key, source] of Object.entries(endpoint.headers ?? {})) {
     const header = typeof source === "string" ? source : process.env[source.env]
     if (header !== undefined) result[key] = header

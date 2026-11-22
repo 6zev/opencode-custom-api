@@ -124,6 +124,7 @@ OpenChamber's provider connection UI stores saved OpenCode credentials in OpenCo
 - If `baseURL` ends in `/v1`, discovery requests `/models` beneath it. Otherwise it tries `/v1/models`, then `/models`.
 - OpenAI-compatible discovery uses `Authorization: Bearer ...`; Anthropic-compatible discovery uses `x-api-key` plus `anthropic-version`.
 - Requests have a timeout and accept cancellation. Cleanup aborts in-flight scheduled refreshes.
+- Discovery sends a stable `opencode-custom-api` User-Agent so gateways and Cloudflare-protected endpoints do not reject anonymous HTTP clients before API authentication.
 - IDs/names and common context, output, modalities, tools, and reasoning fields are parsed.
 - Image-generation-only entries are excluded; multimodal models that also produce text remain available.
 - Metadata precedence is: explicit endpoint metadata (including explicit `false`) → exact or uniquely normalized endpoint catalog key → narrow conservative heuristic/default.
