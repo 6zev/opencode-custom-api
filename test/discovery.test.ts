@@ -28,6 +28,7 @@ describe("discovery", () => {
     const anthropic = resolveHeaders(endpoint({ protocol: "anthropic-compatible", apiKey: { env: "TEST_KEY" } }))
     expect(anthropic["x-api-key"]).toBe("secret")
     expect(anthropic["anthropic-version"]).toBe("2023-06-01")
+    expect(resolveHeaders(endpoint({ headers: { Authorization: "Bearer stale" } }), "active").Authorization).toBe("Bearer active")
   })
 
   it("honors cancellation and timeout", async () => {

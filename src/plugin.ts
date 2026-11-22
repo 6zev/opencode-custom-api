@@ -3,15 +3,24 @@ import type { Plugin as PluginTypes } from "@opencode/plugin"
 import { discover } from "./discovery.js"
 import { loadWithCache } from "./cache.js"
 import { normalizeModel } from "./normalize.js"
+import { autoEndpointFromProvider, credentialSecret, mergeDiscoveredModels, type AutoEndpoint } from "./autodiscovery.js"
 import type { DiscoveredModel, EndpointOptions, PluginOptions } from "./types.js"
 
 type Context = PluginTypes.Context
-interface Source { endpoint: EndpointOptions; models: DiscoveredModel[]; stale: boolean }
+interface Source {
+  endpoint: EndpointOptions
+  models: DiscoveredModel[]
+  stale: boolean
+  auto?: AutoEndpoint
+}
 
 const validDuration = (value: unknown, allowZero: boolean) => typeof value === "number" && Number.isFinite(value) && (allowZero ? value >= 0 : value > 0)
 
 export function parsePluginOptions(value: unknown): PluginOptions {
-  if (!value || typeof value !== "object" || !Array.isArray((value as PluginOptions).endpoints)) throw new Error("custom-api: options.endpoints must be an array")
+  if (value === undefined || value === null) return { endpoints: [] }
+  if (typeof value !== "object") throw new Error("custom-api: options must be an object")
+  if (!("endpoints" in value)) return { endpoints: [] }
+  if (!Array.isArray((value as PluginOptions).endpoints)) throw new Error("custom-api: options.endpoints must be an array")
   const endpoints = (value as PluginOptions).endpoints
   const ids = new Set<string>()
   for (const endpoint of endpoints) {
@@ -52,8 +61,8 @@ function toModel(providerID: Provider.ID, value: DiscoveredModel): Model.Info {
   }
 }
 
-async function readSource(ctx: Context, endpoint: EndpointOptions, force = false, signal?: AbortSignal): Promise<Source> {
-  const load = async () => (await discover(endpoint, signal)).map(raw => normalizeModel(raw, endpoint.catalog)).filter((item): item is DiscoveredModel => item !== undefined)
+async function readSource(ctx: Context, endpoint: EndpointOptions, force = false, signal?: AbortSignal, credential?: string): Promise<Source> {
+  const load = async () => (await discover(endpoint, signal, fetch, credential)).map(raw => normalizeModel(raw, endpoint.catalog)).filter((item): item is DiscoveredModel => item !== undefined)
   const cache = await loadWithCache(
     { get: key => ctx.storage.get(key), set: (key, value) => ctx.storage.set(key, value as never) },
     `inventory/v1/${endpoint.id}`,
@@ -63,6 +72,14 @@ async function readSource(ctx: Context, endpoint: EndpointOptions, force = false
   return { endpoint, ...cache }
 }
 
+async function resolveAutoCredential(ctx: Context, source: AutoEndpoint): Promise<string | undefined> {
+  if (!source.integrationID) return source.settingsApiKey
+  const connection = await ctx.integration.connection.active(source.integrationID)
+  if (!connection) return source.settingsApiKey
+  const credential = await ctx.integration.connection.resolve(connection)
+  return credentialSecret(credential, source.settingsApiKey)
+}
+
 export default Plugin.define({
   id: "custom-api",
   async setup(ctx) {
@@ -70,11 +87,28 @@ export default Plugin.define({
     const controllers = new Set<AbortController>()
     const sources: Source[] = []
     for (const endpoint of config.endpoints) sources.push(await readSource(ctx, endpoint))
+    const configured = new Set(config.endpoints.map(endpoint => endpoint.id))
+    const providers = await ctx.provider.list()
+    for (const provider of providers.data) {
+      const auto = autoEndpointFromProvider(provider, configured)
+      if (!auto) continue
+      try {
+        const source = await readSource(ctx, auto.endpoint, false, undefined, await resolveAutoCredential(ctx, auto))
+        sources.push({ ...source, auto })
+      } catch {
+        sources.push({ endpoint: auto.endpoint, models: [], stale: true, auto })
+      }
+    }
 
     const providerRegistration = await ctx.provider.transform(editor => {
       for (const source of sources) {
         const endpoint = source.endpoint
         const id = Provider.ID.make(endpoint.id)
+        const discovered = source.models.map(model => toModel(id, model))
+        if (source.auto) {
+          editor.models.set(endpoint.id, mergeDiscoveredModels(discovered, editor.get(endpoint.id)?.models ?? new Map()))
+          continue
+        }
         editor.add({
           info: {
             ...Provider.Info.empty(id),
@@ -84,7 +118,7 @@ export default Plugin.define({
             settings: { baseURL: endpoint.baseURL, timeout: endpoint.timeoutMs ?? 10_000 },
             headers: runtimeHeaders(endpoint),
           },
-          models: source.models.map(model => toModel(id, model)),
+          models: discovered,
         })
       }
     })
@@ -102,7 +136,8 @@ export default Plugin.define({
       const selected = sources.filter(source => !only || source.endpoint.id === only)
       if (only && selected.length === 0) throw new Error(`Unknown endpoint: ${only}`)
       await Promise.all(selected.map(async source => {
-        const next = await readSource(ctx, source.endpoint, true, signal)
+        const credential = source.auto ? await resolveAutoCredential(ctx, source.auto) : undefined
+        const next = await readSource(ctx, source.endpoint, true, signal, credential)
         source.models = next.models
         source.stale = next.stale
       }))

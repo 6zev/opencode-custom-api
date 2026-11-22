@@ -7,20 +7,18 @@ export function discoveryURLs(baseURL: string): string[] {
   return /\/v1$/i.test(base) ? [`${base}/models`] : [`${base}/v1/models`, `${base}/models`]
 }
 
-export function resolveHeaders(endpoint: EndpointOptions): Record<string, string> {
+export function resolveHeaders(endpoint: EndpointOptions, credential?: string): Record<string, string> {
   const result: Record<string, string> = { Accept: "application/json" }
-  if (endpoint.apiKey) {
-    const value = process.env[endpoint.apiKey.env]
-    if (value) {
-      if (endpoint.protocol === "anthropic-compatible") {
-        result["x-api-key"] = value
-        result["anthropic-version"] = "2023-06-01"
-      } else result.Authorization = `Bearer ${value}`
-    }
-  }
   for (const [key, source] of Object.entries(endpoint.headers ?? {})) {
-    const value = typeof source === "string" ? source : process.env[source.env]
-    if (value !== undefined) result[key] = value
+    const header = typeof source === "string" ? source : process.env[source.env]
+    if (header !== undefined) result[key] = header
+  }
+  const value = credential ?? (endpoint.apiKey ? process.env[endpoint.apiKey.env] : undefined)
+  if (value) {
+    if (endpoint.protocol === "anthropic-compatible") {
+      result["x-api-key"] = value
+      result["anthropic-version"] = "2023-06-01"
+    } else result.Authorization = `Bearer ${value}`
   }
   return result
 }
@@ -41,12 +39,12 @@ function combinedSignal(timeoutMs: number, signal?: AbortSignal): { signal: Abor
   return { signal: controller.signal, cleanup: () => { clearTimeout(timeout); signal?.removeEventListener("abort", abort) } }
 }
 
-export async function discover(endpoint: EndpointOptions, signal?: AbortSignal, fetcher: typeof fetch = fetch): Promise<ModelMetadata[]> {
+export async function discover(endpoint: EndpointOptions, signal?: AbortSignal, fetcher: typeof fetch = fetch, credential?: string): Promise<ModelMetadata[]> {
   const errors: string[] = []
   for (const url of discoveryURLs(endpoint.baseURL)) {
     const linked = combinedSignal(endpoint.timeoutMs ?? 10_000, signal)
     try {
-      const response = await fetcher(url, { headers: resolveHeaders(endpoint), signal: linked.signal })
+      const response = await fetcher(url, { headers: resolveHeaders(endpoint, credential), signal: linked.signal })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       return parseModels(await response.json())
     } catch (error) {

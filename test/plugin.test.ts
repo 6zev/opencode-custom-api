@@ -9,6 +9,9 @@ describe("plugin surface", () => {
   })
 
   it("validates endpoint options without throwing incidental TypeErrors", () => {
+    expect(parsePluginOptions(undefined)).toEqual({ endpoints: [] })
+    expect(parsePluginOptions({})).toEqual({ endpoints: [] })
+    expect(() => parsePluginOptions({ endpoints: "invalid" })).toThrow(/endpoints must be an array/)
     expect(() => parsePluginOptions({ endpoints: [{ id: "bad" }] })).toThrow(/baseURL/)
     expect(() => parsePluginOptions({ endpoints: [{ id: "bad", baseURL: "https://x" }] })).toThrow(/protocol/)
     const base = { id: "x", baseURL: "https://x", protocol: "openai-compatible" }

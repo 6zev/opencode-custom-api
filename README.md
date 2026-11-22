@@ -34,6 +34,33 @@ For local development, clone this repository and run `npm install && npm run bui
 
 Credentials are **references to environment variables**, never literal API keys:
 
+With an empty Options field, the plugin automatically inspects OpenCode's merged provider registry. It discovers models for custom providers using `@opencode/ai/providers/openai-compatible`, `@opencode/ai/providers/anthropic-compatible`, or OpenChamber's legacy `aisdk:@ai-sdk/openai` runtime when `settings.baseURL` is present. Explicit plugin endpoints remain available and override an auto-detected provider with the same ID.
+
+Zero-options example:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["opencode-custom-api"],
+  "providers": {
+    "acme": {
+      "name": "Acme",
+      "env": ["ACME_API_KEY"],
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "https://api.example.com/v1",
+        "apiKey": "{env:ACME_API_KEY}"
+      },
+      "models": {}
+    }
+  }
+}
+```
+
+`settings.apiKey` may use `{env:NAME}` or `{file:path}`. OpenCode resolves these references before exposing provider metadata to the plugin; the plugin does not read arbitrary files itself. If the provider has an active credential saved through `/connect`, that credential takes precedence and is resolved again on refresh. Secrets are used only in memory for discovery requests and are never written to plugin storage.
+
+OpenChamber's provider connection UI stores saved OpenCode credentials in OpenCode's credential store (on Linux, normally `~/.local/share/opencode/opencode.db`). This plugin never opens that database; it uses the public `ctx.integration.connection.active()` and `resolve()` APIs so storage format and access control remain OpenCode's responsibility.
+
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
@@ -107,14 +134,14 @@ OpenCode V2 already integrates models.dev. This plugin deliberately does **not**
 
 ## Cache and refresh
 
-Last successful inventories are stored with a version and timestamp using `ctx.storage`; no filesystem path is hard-coded. A valid fresh entry avoids HTTP. On an expired-cache refresh failure, the last successful inventory is used as stale fallback. If no valid cache exists, setup fails rather than registering an invented inventory.
+Last successful inventories are stored with a version and timestamp using `ctx.storage`; no filesystem path is hard-coded. Credentials and request headers are not cached. A valid fresh entry avoids HTTP. On an expired-cache refresh failure, the last successful inventory is used as stale fallback. An explicitly configured plugin endpoint fails setup when neither discovery nor cache is available; an auto-detected provider keeps its existing configured models so one unavailable endpoint does not prevent the plugin from loading.
 
 Manual refresh interfaces:
 
 - Command: `/custom-api-refresh` refreshes all endpoints.
 - Tool: `custom_api_refresh` refreshes all endpoints or one optional endpoint ID and cooperates with session cancellation.
 
-Refresh updates captured source data, then calls the official provider and model reload APIs. External HTTP work is always completed before synchronous transform callbacks.
+Refresh resolves the current active provider credential again, updates captured source data, then calls the official provider and model reload APIs. External HTTP work is always completed before synchronous transform callbacks. For auto-detected providers, discovered models are added while explicitly configured models win on ID collisions.
 
 ## Security
 
@@ -128,7 +155,7 @@ Refresh updates captured source data, then calls the official provider and model
 - Compatibility endpoints vary; discovery requires one of the documented response shapes.
 - Metadata names are not standardized. Unknown fields are ignored and conservative defaults apply.
 - The plugin cannot safely query OpenCode's private models.dev internals and intentionally avoids private APIs or monkey patching.
-- Runtime authentication headers are resolved when the plugin loads. Restart OpenCode after rotating environment variables.
+- Saved `/connect` credentials are resolved again on refresh. Environment/file substitutions in provider config are resolved by OpenCode when it reloads configuration.
 - The refresh command has no arguments; use the tool when refreshing a single endpoint.
 
 ## Development
