@@ -1,0 +1,21 @@
+{
+  "name": "opencode-custom-api",
+  "version": "0.1.0",
+  "description": "Discover custom OpenAI- and Anthropic-compatible model endpoints in OpenCode V2",
+  "type": "module",
+  "license": "MIT",
+  "author": "OpenCode community",
+  "keywords": ["opencode", "plugin", "openai", "anthropic", "models"],
+  "repository": { "type": "git", "url": "https://github.com/6zev/opencode-custom-api.git" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run test && npm run typecheck && npm run build"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": { "@opencode/plugin": "^2.3.2" },
+  "devDependencies": { "@types/node": "^24.10.1", "typescript": "^5.9.3", "vitest": "^4.0.14" }
+}
