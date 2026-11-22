@@ -3,6 +3,7 @@ import type { EndpointOptions, Protocol } from "./types.js"
 
 const PACKAGES: Record<string, Protocol> = {
   "@opencode/ai/providers/openai-compatible": "openai-compatible",
+  "@opencode/ai/providers/openai": "openai-compatible",
   "@opencode/ai/providers/anthropic-compatible": "anthropic-compatible",
   "aisdk:@ai-sdk/openai": "openai-compatible",
 }
@@ -35,7 +36,7 @@ export function autoEndpointFromProvider(provider: ProviderCandidate, excluded =
   const apiKey = provider.settings?.apiKey
   return {
     endpoint,
-    ...(provider.integrationID ? { integrationID: provider.integrationID } : {}),
+    integrationID: provider.integrationID ?? provider.id,
     ...(typeof apiKey === "string" && apiKey ? { settingsApiKey: apiKey } : {}),
   }
 }

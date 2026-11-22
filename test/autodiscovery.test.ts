@@ -18,7 +18,7 @@ describe("provider auto-discovery", () => {
     expect(JSON.stringify(auto?.endpoint)).not.toContain("resolved-key")
     expect(autoEndpointFromProvider(provider({ package: "@opencode/ai/providers/anthropic-compatible" }))?.endpoint.protocol).toBe("anthropic-compatible")
     expect(autoEndpointFromProvider(provider({ package: "aisdk:@ai-sdk/openai" }))?.endpoint.protocol).toBe("openai-compatible")
-    expect(autoEndpointFromProvider(provider({ package: "@opencode/ai/providers/openai" }))).toBeUndefined()
+    expect(autoEndpointFromProvider(provider({ package: "@opencode/ai/providers/openai" }))).toMatchObject({ integrationID: "acme", endpoint: { protocol: "openai-compatible" } })
     expect(autoEndpointFromProvider(provider(), new Set(["acme"]))).toBeUndefined()
   })
 

@@ -34,7 +34,7 @@ For local development, clone this repository and run `npm install && npm run bui
 
 Credentials are **references to environment variables**, never literal API keys:
 
-With an empty Options field, the plugin automatically inspects OpenCode's merged provider registry. It discovers models for custom providers using `@opencode/ai/providers/openai-compatible`, `@opencode/ai/providers/anthropic-compatible`, or OpenChamber's legacy `aisdk:@ai-sdk/openai` runtime when `settings.baseURL` is present. Explicit plugin endpoints remain available and override an auto-detected provider with the same ID.
+With an empty Options field, the plugin automatically inspects OpenCode's merged provider registry. It discovers models for custom providers using `@opencode/ai/providers/openai-compatible`, `@opencode/ai/providers/openai`, `@opencode/ai/providers/anthropic-compatible`, or OpenChamber's legacy `aisdk:@ai-sdk/openai` runtime when `settings.baseURL` is present. OpenCode may normalize the legacy AI SDK package to its native OpenAI runtime; both forms are recognized. Explicit plugin endpoints remain available and override an auto-detected provider with the same ID.
 
 Zero-options example:
 
