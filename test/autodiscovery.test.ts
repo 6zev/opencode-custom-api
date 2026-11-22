@@ -29,12 +29,12 @@ describe("provider auto-discovery", () => {
     expect(credentialSecret(undefined, "config")).toBe("config")
   })
 
-  it("preserves explicit configured models on ID collisions", () => {
+  it("overrides configured models with discovered metadata on ID collisions", () => {
     const id = Provider.ID.make("acme")
     const discovered = { ...Model.Info.default(id, Model.ID.make("same")), name: "Discovered" }
     const explicit = { ...Model.Info.default(id, Model.ID.make("same")), name: "Explicit" }
     const extra = { ...Model.Info.default(id, Model.ID.make("extra")), name: "Extra" }
     const merged = mergeDiscoveredModels([discovered, extra], new Map([["same", explicit]]))
-    expect(merged.map(model => [model.id, model.name])).toEqual([["same", "Explicit"], ["extra", "Extra"]])
+    expect(merged.map(model => [model.id, model.name])).toEqual([["same", "Discovered"], ["extra", "Extra"]])
   })
 })

@@ -142,7 +142,7 @@ Manual refresh interfaces:
 - Command: `/custom-api-refresh` refreshes all endpoints.
 - Tool: `custom_api_refresh` refreshes all endpoints or one optional endpoint ID and cooperates with session cancellation.
 
-Refresh resolves the current active provider credential again, updates captured source data, then calls the official provider and model reload APIs. External HTTP work is always completed before synchronous transform callbacks. For auto-detected providers, discovered models are added while explicitly configured models win on ID collisions.
+Refresh resolves the current active provider credential again, updates captured source data, then re-registers provider and model overlays at the end of transform order. External HTTP work is always completed before synchronous transform callbacks. For auto-detected providers, discovered metadata overrides configured model metadata on ID collisions.
 
 ## Security
 

@@ -51,7 +51,7 @@ export function credentialSecret(value: unknown, fallback?: string): string | un
 }
 
 export function mergeDiscoveredModels(discovered: readonly Model.Info[], existing: ReadonlyMap<string, Model.Info>): Model.Info[] {
-  const merged = new Map(discovered.map(model => [model.id, model]))
-  for (const model of existing.values()) merged.set(model.id, model)
+  const merged = new Map(existing)
+  for (const model of discovered) merged.set(model.id, model)
   return [...merged.values()]
 }
