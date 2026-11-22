@@ -22,6 +22,11 @@ describe("normalization", () => {
 
   it("uses narrow reasoning heuristic and excludes image-only models", () => {
     expect(normalizeModel({ id: "o3-mini" })?.reasoning).toBe(true)
+    expect(normalizeModel({ id: "ai.baselgovernance.org/openai/gpt-5.6-sol" })?.reasoning).toBe(true)
+    expect(normalizeModel({ id: "ai.baselgovernance.org/moonshotai/kimi-k3" })?.reasoning).toBe(true)
+    expect(normalizeModel({ id: "chat.aqor.io/kimi-k2.5" })?.reasoning).toBe(false)
+    expect(normalizeModel({ id: "ai.baselgovernance.org/openai/gpt-5.6-sol", reasoning: false })?.reasoning).toBe(false)
+    expect(normalizeModel({ id: "gpt-4o" })?.reasoning).toBe(false)
     expect(normalizeModel({ id: "emotional-support" })?.reasoning).toBe(false)
     expect(normalizeModel({ id: "image", type: "image-generation" })).toBeUndefined()
     expect(normalizeModel({ id: "image-2", output_modalities: ["image"] })).toBeUndefined()

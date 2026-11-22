@@ -19,6 +19,25 @@ interface AutoCandidate {
   fingerprint: string
 }
 
+type ProviderRecord = { provider: Provider.Info; models: ReadonlyMap<string, Model.Info> }
+
+const normalizedTail = (id: string) => (id.split("/").at(-1) ?? id).toLowerCase().replace(/^models\//, "").replace(/[_ ]/g, "-")
+
+/** Conservatively resolves an API model against OpenCode's already-normalized host catalog. */
+export function matchHostModel(id: string, records: readonly ProviderRecord[]): Model.Info | undefined {
+  const candidates = records.flatMap(record => [...record.models.values()].map(model => ({ model, provider: record.provider })))
+  const unique = (items: typeof candidates) => items.length === 1 ? items[0]?.model : undefined
+  const exact = candidates.filter(({ model }) => model.id === id || model.modelID === id)
+  if (exact.length) return unique(exact)
+  const suffix = candidates.filter(({ model, provider }) => {
+    const canonical = model.canonical ?? provider.id
+    return id.endsWith(`/${canonical}/${model.modelID}`) || id === `${canonical}/${model.modelID}`
+  })
+  if (suffix.length) return unique(suffix)
+  const normalized = normalizedTail(id)
+  return unique(candidates.filter(({ model }) => normalizedTail(model.modelID) === normalized))
+}
+
 const validDuration = (value: unknown, allowZero: boolean) => typeof value === "number" && Number.isFinite(value) && (allowZero ? value >= 0 : value > 0)
 
 export function parsePluginOptions(value: unknown): PluginOptions {
@@ -55,22 +74,36 @@ function runtimeHeaders(endpoint: EndpointOptions): Record<string, string> {
   return headers
 }
 
-function toModel(providerID: Provider.ID, value: DiscoveredModel): Model.Info {
+function toModel(providerID: Provider.ID, value: DiscoveredModel, catalog?: Model.Info): Model.Info {
+  const hostCapabilities = catalog?.capabilities
+  const hostLimit = catalog?.limit
+  const context = value.provenance.context === "default" && hostLimit ? hostLimit.context : value.context
+  const output = value.provenance.output === "default" && hostLimit ? hostLimit.output : value.output
+  const tools = value.provenance.tools === "default" && hostCapabilities ? hostCapabilities.tools : value.tools
+  const input = value.provenance.input === "default" && hostCapabilities ? [...hostCapabilities.input] : value.input
+  const reasoning = value.provenance.reasoning === "default" && catalog ? catalog.variants.length > 0 : value.reasoning
+  const variants = reasoning ? catalog?.variants.length ? catalog.variants.map(variant => ({ ...variant })) : reasoningVariants(value.id) : []
   return {
     ...Model.Info.default(providerID, Model.ID.make(value.id)),
-    name: value.name,
-    type: value.type,
-    limit: { context: value.context, output: value.output },
-    capabilities: { tools: value.tools, input: value.input, output: ["text"] },
-    compatibility: value.reasoning ? { requireReasoning: true } : undefined,
+    ...(catalog?.family ? { family: catalog.family } : {}),
+    name: value.provenance.name === "default" && catalog ? catalog.name : value.name,
+    type: value.type ?? catalog?.type,
+    limit: { ...catalog?.limit, context, output: Math.min(output, context) },
+    capabilities: { ...hostCapabilities, tools, input, output: hostCapabilities?.output ?? ["text"] },
+    variants,
   }
+}
+
+function reasoningVariants(modelID: string): Model.Info["variants"] {
+  const efforts = /(?:^|\/)kimi-k3(?:[.-]|$)/i.test(modelID) ? ["low", "high", "max"] : ["low", "medium", "high", "xhigh"]
+  return efforts.map(id => ({ id: Model.VariantID.make(id), settings: { reasoningEffort: id } }))
 }
 
 async function readSource(ctx: Context, endpoint: EndpointOptions, force = false, signal?: AbortSignal, credential?: string): Promise<Source> {
   const load = async () => (await discover(endpoint, signal, fetch, credential)).map(raw => normalizeModel(raw, endpoint.catalog)).filter((item): item is DiscoveredModel => item !== undefined)
   const cache = await loadWithCache(
     { get: key => ctx.storage.get(key), set: (key, value) => ctx.storage.set(key, value as never) },
-    `inventory/v1/${endpoint.id}`,
+    `inventory/v2/${endpoint.id}`,
     force ? 0 : endpoint.cacheTtlMs ?? 300_000,
     load,
   )
@@ -124,12 +157,17 @@ export default Plugin.define({
     let queue = Promise.resolve()
     let forceReconcile = false
     let queued = false
+    const hostRecords = new Map<string, ProviderRecord>()
 
     const applyProviders = (editor: Parameters<Parameters<typeof ctx.provider.transform>[0]>[0]) => {
+      const owned = new Set(sources().map(source => source.endpoint.id))
+      hostRecords.clear()
+      for (const record of editor.list()) if (!owned.has(record.provider.id)) hostRecords.set(record.provider.id, record)
       for (const source of sources()) {
         const endpoint = source.endpoint
         const id = Provider.ID.make(endpoint.id)
-        const discovered = source.models.map(model => toModel(id, model))
+        const catalog = [...hostRecords.values()]
+        const discovered = source.models.map(model => toModel(id, model, matchHostModel(model.id, catalog)))
         if (source.auto) {
           editor.models.set(endpoint.id, mergeDiscoveredModels(discovered, editor.get(endpoint.id)?.models ?? new Map()))
           continue
@@ -147,15 +185,7 @@ export default Plugin.define({
         })
       }
     }
-    const applyModels = (editor: Parameters<Parameters<typeof ctx.model.transform>[0]>[0]) => {
-      for (const source of sources()) for (const model of source.models) {
-        if (!model.reasoning) continue
-        editor.update(source.endpoint.id, model.id, draft => { draft.compatibility = { ...draft.compatibility, requireReasoning: true } })
-      }
-    }
-
     let providerRegistration = await ctx.provider.transform(applyProviders)
-    let modelRegistration = await ctx.model.transform(applyModels)
 
     const registerAtTail = async () => {
       if (lifecycle.signal.aborted) return
@@ -164,11 +194,6 @@ export default Plugin.define({
       const previousProviderRegistration = providerRegistration
       providerRegistration = nextProviderRegistration
       await previousProviderRegistration.dispose()
-      const nextModelRegistration = await ctx.model.transform(applyModels)
-      if (lifecycle.signal.aborted) return nextModelRegistration.dispose()
-      const previousModelRegistration = modelRegistration
-      modelRegistration = nextModelRegistration
-      await previousModelRegistration.dispose()
     }
 
     const reconcile = async () => {
@@ -287,7 +312,7 @@ export default Plugin.define({
       timers.forEach(clearInterval)
       lifecycle.abort()
       controllers.forEach(controller => controller.abort())
-      await Promise.all([providerRegistration.dispose(), modelRegistration.dispose(), toolRegistration.dispose(), commandRegistration.dispose(), eventTask, queue])
+      await Promise.all([providerRegistration.dispose(), toolRegistration.dispose(), commandRegistration.dispose(), eventTask, queue])
     }
   },
 })

@@ -36,7 +36,7 @@ export function normalizeModel(raw: ModelMetadata, catalog?: Record<string, Mode
   const catalogReasoning = bool(catalogCaps.reasoning, match?.reasoning)
   const explicitInput = Array.isArray(endpointCaps.input) ? endpointCaps.input : Array.isArray(raw.input) ? raw.input : undefined
   const catalogInput = Array.isArray(catalogCaps.input) ? catalogCaps.input : Array.isArray(match?.input) ? match.input : undefined
-  const heuristicReasoning = /^(o[1-9](?:-|$)|.*\b(reasoner|reasoning)\b)/i.test(id)
+  const heuristicReasoning = /^(o[1-9](?:-|$)|.*\b(reasoner|reasoning)\b)/i.test(id) || /(?:^|\/)gpt-5(?:[.-]|$)/i.test(id) || /(?:^|\/)kimi-k3(?:[.-]|$)/i.test(id)
   const source = <T>(explicit: T | undefined, catalogValue: T | undefined, fallback: T, heuristic?: T): [T, "endpoint" | "catalog" | "heuristic" | "default"] =>
     explicit !== undefined ? [explicit, "endpoint"] : catalogValue !== undefined ? [catalogValue, "catalog"] : heuristic !== undefined ? [heuristic, "heuristic"] : [fallback, "default"]
   const [context, contextSource] = source(explicitContext, catalogContext, 32_768)
@@ -45,5 +45,5 @@ export function normalizeModel(raw: ModelMetadata, catalog?: Record<string, Mode
   const [tools, toolsSource] = source(explicitTools, catalogTools, false)
   const [reasoning, reasoningSource] = source(explicitReasoning, catalogReasoning, false, heuristicReasoning ? true : undefined)
   const [input, inputSource] = source(explicitInput, catalogInput, ["text"])
-  return { id, name: typeof raw.name === "string" ? raw.name : id, context, output, tools, reasoning, input, ...(typeof raw.type === "string" ? { type: raw.type } : {}), provenance: { context: contextSource, output: outputSource, tools: toolsSource, reasoning: reasoningSource, input: inputSource } }
+  return { id, name: typeof raw.name === "string" ? raw.name : typeof match?.name === "string" ? match.name : id, context, output, tools, reasoning, input, ...(typeof raw.type === "string" ? { type: raw.type } : typeof match?.type === "string" ? { type: match.type } : {}), provenance: { context: contextSource, output: outputSource, tools: toolsSource, reasoning: reasoningSource, input: inputSource, name: typeof raw.name === "string" ? "endpoint" : typeof match?.name === "string" ? "catalog" : "default", type: typeof raw.type === "string" ? "endpoint" : typeof match?.type === "string" ? "catalog" : "default" } }
 }

@@ -127,11 +127,11 @@ OpenChamber's provider connection UI stores saved OpenCode credentials in OpenCo
 - Discovery sends a stable `opencode-custom-api` User-Agent so gateways and Cloudflare-protected endpoints do not reject anonymous HTTP clients before API authentication.
 - IDs/names and common context, output, modalities, tools, and reasoning fields are parsed.
 - Image-generation-only entries are excluded; multimodal models that also produce text remain available.
-- Metadata precedence is: explicit endpoint metadata (including explicit `false`) → exact or uniquely normalized endpoint catalog key → narrow conservative heuristic/default.
+- Metadata precedence is: explicit endpoint metadata (including explicit `false`/empty values) → exact or uniquely normalized endpoint catalog key → OpenCode's host-normalized models.dev metadata → narrow conservative heuristic/default.
 - Normalized catalog matching only lowercases, removes a leading `models/`, and normalizes spaces/underscores to hyphens. It does not use substring/fuzzy matching.
 - Conservative defaults are 32,768 context tokens, 4,096 output tokens, text input, no tools, and no reasoning. Only IDs beginning with `o1`…`o9`, or containing the complete word `reasoner`/`reasoning`, infer reasoning.
 
-OpenCode V2 already integrates models.dev. This plugin deliberately does **not** download or duplicate its full catalog because the plugin API does not expose a stable safe catalog lookup. The optional per-endpoint `catalog` supplies trusted enrichment. Internally each field records endpoint/catalog/heuristic/default provenance. V2 2.3.x has no `capabilities.reasoning` field, so reasoning is adapted through the official `compatibility.requireReasoning` model field; input and tools map directly to V2 capabilities.
+OpenCode V2 already bundles, caches, and normalizes models.dev. The plugin reuses those host provider records and never performs a second catalog download or stores a duplicate catalog. Matching is conservative: exact model identity first, then a canonical-provider suffix, then a unique normalized tail; ambiguous matches are rejected and there is no fuzzy token matching. Host variants are copied wholesale (including settings, body, and headers). When there is no host match/variant, documented family fallbacks remain: GPT-5-style models use `low`/`medium`/`high`/`xhigh`, while Kimi K3 uses `low`/`high`/`max`.
 
 ## Cache and refresh
 
@@ -142,7 +142,7 @@ Manual refresh interfaces:
 - Command: `/custom-api-refresh` refreshes all endpoints.
 - Tool: `custom_api_refresh` refreshes all endpoints or one optional endpoint ID and cooperates with session cancellation.
 
-Refresh resolves the current active provider credential again, updates captured source data, then re-registers provider and model overlays at the end of transform order. External HTTP work is always completed before synchronous transform callbacks. For auto-detected providers, discovered metadata overrides configured model metadata on ID collisions.
+Refresh resolves the current active provider credential again, updates captured source data, then re-registers the provider overlay at the end of transform order. External HTTP work is always completed before synchronous transform callbacks. For auto-detected providers, discovered metadata overrides configured model metadata on ID collisions.
 
 ## Security
 
@@ -155,7 +155,7 @@ Refresh resolves the current active provider credential again, updates captured 
 
 - Compatibility endpoints vary; discovery requires one of the documented response shapes.
 - Metadata names are not standardized. Unknown fields are ignored and conservative defaults apply.
-- The plugin cannot safely query OpenCode's private models.dev internals and intentionally avoids private APIs or monkey patching.
+- Host catalog enrichment depends on models already exposed through the public provider transform source records; unavailable or ambiguous entries fall back conservatively.
 - Saved `/connect` credentials are resolved again on refresh. Environment/file substitutions in provider config are resolved by OpenCode when it reloads configuration.
 - The refresh command has no arguments; use the tool when refreshing a single endpoint.
 
