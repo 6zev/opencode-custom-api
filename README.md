@@ -142,16 +142,18 @@ npm pack --dry-run
 
 ## Publishing
 
-The GitHub Actions workflow at `.github/workflows/publish.yml` publishes the package when a GitHub Release is published. For release-triggered runs, the release tag (for example `v0.1.0`) must match the version in `package.json`.
+The GitHub Actions workflow at `.github/workflows/publish.yml` publishes the existing [`opencode-custom-api`](https://www.npmjs.com/package/opencode-custom-api) package through npm Trusted Publishing (OIDC). It uses no npm token or repository secret. For release-triggered runs, the release tag (for example `v0.1.0`) must match the version in `package.json`.
 
-Before the first release:
+Configure the package once on npmjs.com under **Settings → Trusted Publisher → GitHub Actions**:
 
-1. Create a GitHub Actions environment named `npm`.
-2. Add an npm automation or granular access token as the repository or environment secret `NPM_TOKEN`.
-3. Ensure the token can publish the `opencode-custom-api` package.
-4. Update `package.json` and `package-lock.json` to the release version, push the change, then publish a matching GitHub Release.
+1. Set the organization or user to `6zev` and repository to `opencode-custom-api`.
+2. Set the workflow filename to `publish.yml` (including the extension).
+3. Leave the environment blank; this workflow does not use a GitHub environment.
+4. Enable **Allow npm publish** rather than provenance-only staging.
 
-The workflow can also be started manually with **Actions → Publish to npm → Run workflow**. Every run installs from the lockfile, tests, type-checks, builds, and publishes with npm provenance.
+To release, update the versions in `package.json` and `package-lock.json`, push the change, and publish a matching GitHub Release. The workflow can also be started manually with **Actions → Publish to npm → Run workflow**.
+
+Every run uses a GitHub-hosted runner, requests `id-token: write`, installs an OIDC-capable npm CLI, tests, type-checks, builds, and publishes. npm generates provenance automatically for Trusted Publisher releases.
 
 ## License
 
