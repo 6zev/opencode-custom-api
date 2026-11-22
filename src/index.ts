@@ -1,5 +1,7 @@
 export { default } from "./plugin.js"
 export * from "./types.js"
 export { discover, discoveryURLs, parseModels, resolveHeaders } from "./discovery.js"
-export { normalizeModel, normalizeCatalogID, isImageOnly } from "./normalize.js"
+export { normalizeModel, normalizeCatalogID, isImageOnly, isNonChat } from "./normalize.js"
+export { compilePatterns, filterModels } from "./filter.js"
+export { DEFAULT_AUTO_REFRESH_MS } from "./autodiscovery.js"
 export { loadWithCache, validCache } from "./cache.js"

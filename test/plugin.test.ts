@@ -43,7 +43,7 @@ describe("plugin surface", () => {
     const transforms = vi.fn(async (callback: (editor: any) => void) => { callback({ list: () => [], get: vi.fn(), add: vi.fn(), update: vi.fn(), namespace: vi.fn(), models: { set: vi.fn() } }); return { dispose: vi.fn(async () => {}) } })
     const event = { subscribe: ({ signal }: { signal: AbortSignal }) => ({ async *[Symbol.asyncIterator]() { await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })) } }) }
     const cleanup = await plugin.setup({ options: { endpoints: [{ id: "cache-key", baseURL: "https://cache.example/v1", protocol: "openai-compatible" }] }, provider: { transform: transforms, list: vi.fn(async () => ({ location: {}, data: [] })) }, model: { transform: transforms }, tool: { transform: transforms }, command: { transform: transforms }, event, storage, integration: { connection: { active: vi.fn(), resolve: vi.fn() } } } as never)
-    expect(storage.get).toHaveBeenCalledWith("inventory/v2/cache-key")
+    expect(storage.get).toHaveBeenCalledWith("inventory/v3/cache-key")
     await cleanup?.()
   })
 

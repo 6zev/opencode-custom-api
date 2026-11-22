@@ -14,13 +14,14 @@ export interface ModelMetadata {
   max_context_length?: number
   output?: number
   max_output_tokens?: number
-  capabilities?: CapabilityMetadata
+  /** Flat capability object, or a capability name list as LM Studio reports it. */
+  capabilities?: CapabilityMetadata | string[]
   input?: string[]
   tools?: boolean
   tool_calling?: boolean
   reasoning?: boolean
   type?: string
-  modalities?: string[]
+  modalities?: string[] | { input?: string[]; output?: string[] }
   output_modalities?: string[]
   [key: string]: unknown
 }
@@ -35,8 +36,26 @@ export interface EndpointOptions {
   cacheTtlMs?: number
   refreshIntervalMs?: number
   catalog?: Record<string, ModelMetadata>
+  /** Model-list location: an absolute URL, or a path beginning with `/` resolved from the baseURL origin. */
+  endpoint?: string
+  /** Regular expressions; when present only matching model IDs are kept. */
+  include?: string[]
+  /** Regular expressions; matching model IDs are dropped. Applied after `include`. */
+  exclude?: string[]
+  /** Auto-detected providers only: replace the provider's model list instead of merging into it. */
+  pruneMissing?: boolean
 }
-export interface PluginOptions { endpoints: EndpointOptions[] }
+/** Defaults applied to providers found in OpenCode's registry rather than declared in `endpoints`. */
+export interface AutoOptions {
+  enabled?: boolean
+  timeoutMs?: number
+  cacheTtlMs?: number
+  refreshIntervalMs?: number
+  include?: string[]
+  exclude?: string[]
+  pruneMissing?: boolean
+}
+export interface PluginOptions { endpoints: EndpointOptions[]; auto?: AutoOptions }
 export interface DiscoveredModel {
   id: string
   name: string

@@ -2,7 +2,12 @@ import type { EndpointOptions, ModelMetadata } from "./types.js"
 
 const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
 
-export function discoveryURLs(baseURL: string): string[] {
+export function discoveryURLs(baseURL: string, endpoint?: string): string[] {
+  if (endpoint) {
+    if (/^https?:\/\//i.test(endpoint)) return [endpoint]
+    if (endpoint.startsWith("/")) return [new URL(endpoint, baseURL).toString()]
+    throw new Error(`Model-list endpoint must be an absolute URL or begin with "/": ${endpoint}`)
+  }
   const base = baseURL.replace(/\/+$/, "")
   return /\/v1$/i.test(base) ? [`${base}/models`] : [`${base}/v1/models`, `${base}/models`]
 }
@@ -41,7 +46,7 @@ function combinedSignal(timeoutMs: number, signal?: AbortSignal): { signal: Abor
 
 export async function discover(endpoint: EndpointOptions, signal?: AbortSignal, fetcher: typeof fetch = fetch, credential?: string): Promise<ModelMetadata[]> {
   const errors: string[] = []
-  for (const url of discoveryURLs(endpoint.baseURL)) {
+  for (const url of discoveryURLs(endpoint.baseURL, endpoint.endpoint)) {
     const linked = combinedSignal(endpoint.timeoutMs ?? 10_000, signal)
     try {
       const response = await fetcher(url, { headers: resolveHeaders(endpoint, credential), signal: linked.signal })

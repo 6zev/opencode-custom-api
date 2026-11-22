@@ -1,5 +1,9 @@
 import type { Model, Provider } from "@opencode/plugin"
-import type { EndpointOptions, Protocol } from "./types.js"
+import { validPatterns } from "./filter.js"
+import type { AutoOptions, EndpointOptions, ModelMetadata, Protocol } from "./types.js"
+
+/** Auto-detected providers re-check their model list this often unless configured otherwise. */
+export const DEFAULT_AUTO_REFRESH_MS = 1_800_000
 
 const PACKAGES: Record<string, Protocol> = {
   "@opencode/ai/providers/openai-compatible": "openai-compatible",
@@ -19,19 +23,47 @@ type ProviderCandidate = Pick<Provider.Info, "name" | "package" | "settings" | "
   integrationID?: string | undefined
 }
 
-export function autoEndpointFromProvider(provider: ProviderCandidate, excluded = new Set<string>()): AutoEndpoint | undefined {
+const duration = (value: unknown, allowZero: boolean): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && (allowZero ? value >= 0 : value > 0) ? value : undefined
+const plainObject = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+
+/**
+ * Builds a discovery endpoint from a provider in OpenCode's registry.
+ * Per-provider `settings.modelsDiscovery` overrides the plugin-level `auto` defaults.
+ * Invalid per-provider values are ignored rather than thrown, so one bad provider block cannot stop the plugin.
+ */
+export function autoEndpointFromProvider(provider: ProviderCandidate, excluded = new Set<string>(), defaults: AutoOptions = {}): AutoEndpoint | undefined {
   if (excluded.has(provider.id)) return undefined
   const protocol = PACKAGES[provider.package]
   const baseURL = provider.settings?.baseURL
   if (!protocol || typeof baseURL !== "string" || !/^https?:\/\//.test(baseURL)) return undefined
-  const timeout = provider.settings?.timeout
+  const local = plainObject(provider.settings?.modelsDiscovery) ?? {}
+  if (local.enabled === false) return undefined
+  if (defaults.enabled === false && local.enabled !== true) return undefined
+  const filters = plainObject(local.models) ?? {}
+  const timeoutMs = duration(local.timeoutMs, false) ?? duration(provider.settings?.timeout, false) ?? duration(defaults.timeoutMs, false)
+  const cacheTtlMs = duration(local.cacheTtlMs, true) ?? duration(defaults.cacheTtlMs, true)
+  const refreshIntervalMs = duration(local.refreshIntervalMs, true) ?? duration(defaults.refreshIntervalMs, true) ?? DEFAULT_AUTO_REFRESH_MS
+  const include = validPatterns(local.include) ?? validPatterns(filters.includeRegex) ?? validPatterns(defaults.include)
+  const exclude = validPatterns(local.exclude) ?? validPatterns(filters.excludeRegex) ?? validPatterns(defaults.exclude)
+  const pruneMissing = typeof local.pruneMissing === "boolean" ? local.pruneMissing : defaults.pruneMissing === true
+  const listEndpoint = typeof local.endpoint === "string" && (local.endpoint.startsWith("/") || /^https?:\/\//i.test(local.endpoint)) ? local.endpoint : undefined
+  const catalog = plainObject(local.catalog) as Record<string, ModelMetadata> | undefined
   const endpoint: EndpointOptions = {
     id: provider.id,
     name: provider.name,
     baseURL,
     protocol,
+    refreshIntervalMs,
     ...(provider.headers ? { headers: provider.headers } : {}),
-    ...(typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0 ? { timeoutMs: timeout } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(cacheTtlMs !== undefined ? { cacheTtlMs } : {}),
+    ...(include?.length ? { include } : {}),
+    ...(exclude?.length ? { exclude } : {}),
+    ...(pruneMissing ? { pruneMissing } : {}),
+    ...(listEndpoint ? { endpoint: listEndpoint } : {}),
+    ...(catalog ? { catalog } : {}),
   }
   const apiKey = provider.settings?.apiKey
   return {
