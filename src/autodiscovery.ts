@@ -3,7 +3,7 @@ import { validPatterns } from "./filter.js"
 import type { AutoOptions, EndpointOptions, ModelMetadata, Protocol } from "./types.js"
 
 /** Auto-detected providers re-check their model list this often unless configured otherwise. */
-export const DEFAULT_AUTO_REFRESH_MS = 1_800_000
+export const DEFAULT_AUTO_REFRESH_MS = 300_000
 
 /**
  * Provider runtimes whose model list this plugin knows how to read. The value only selects
@@ -29,7 +29,7 @@ const BUILTIN_IDS = new Set([
   "amazon-bedrock", "azure", "openrouter", "mistral", "gitlab",
 ])
 
-type ProviderShape = { provider: Pick<Provider.Info, "id"> & { canonical?: string | undefined }; models: ReadonlyMap<string, Model.Info> }
+type ProviderShape = { provider: Pick<Provider.Info, "id"> & { canonical?: string | undefined; package?: string | undefined }; models: ReadonlyMap<string, Model.Info> }
 
 /**
  * True when a provider comes from OpenCode's bundled catalog rather than from the user's own configuration.
@@ -41,6 +41,8 @@ export function looksBuiltin(record: ProviderShape): boolean {
   const { provider, models } = record
   if (BUILTIN_IDS.has(provider.id)) return true
   if (provider.canonical && provider.canonical !== provider.id) return false
+  // The catalog only uses OpenCode's native runtimes; an AI SDK package is always written by the user or by OpenChamber.
+  if (provider.package?.startsWith("aisdk:")) return false
   for (const model of models.values()) {
     if (model.family || (model.cost?.length ?? 0) > 0 || (model.time?.released ?? 0) > 0) return true
   }
@@ -82,7 +84,8 @@ export function autoEndpointFromProvider(provider: ProviderCandidate, excluded =
   const refreshIntervalMs = duration(local.refreshIntervalMs, true) ?? duration(defaults.refreshIntervalMs, true) ?? DEFAULT_AUTO_REFRESH_MS
   const include = validPatterns(local.include) ?? validPatterns(filters.includeRegex) ?? validPatterns(defaults.include)
   const exclude = validPatterns(local.exclude) ?? validPatterns(filters.excludeRegex) ?? validPatterns(defaults.exclude)
-  const pruneMissing = typeof local.pruneMissing === "boolean" ? local.pruneMissing : defaults.pruneMissing === true
+  // Auto-detected providers mirror the upstream list: models it stops listing are removed unless pruning is turned off.
+  const pruneMissing = typeof local.pruneMissing === "boolean" ? local.pruneMissing : defaults.pruneMissing !== false
   const listEndpoint = typeof local.endpoint === "string" && (local.endpoint.startsWith("/") || /^https?:\/\//i.test(local.endpoint)) ? local.endpoint : undefined
   const catalog = plainObject(local.catalog) as Record<string, ModelMetadata> | undefined
   const endpoint: EndpointOptions = {
@@ -96,7 +99,7 @@ export function autoEndpointFromProvider(provider: ProviderCandidate, excluded =
     ...(cacheTtlMs !== undefined ? { cacheTtlMs } : {}),
     ...(include?.length ? { include } : {}),
     ...(exclude?.length ? { exclude } : {}),
-    ...(pruneMissing ? { pruneMissing } : {}),
+    pruneMissing,
     ...(listEndpoint ? { endpoint: listEndpoint } : {}),
     ...(catalog ? { catalog } : {}),
   }

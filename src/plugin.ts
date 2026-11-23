@@ -209,7 +209,8 @@ export default Plugin.define({
         const discovered = source.models.map(model => toModel(id, model, matchHostModel(model.id, catalog)))
         if (source.auto) {
           // Pruning only happens on a live, non-empty inventory so an outage never empties a provider.
-          const prune = endpoint.pruneMissing === true && !source.stale && discovered.length > 0
+          // A built-in provider that was opted in keeps its catalog models; only its additions come from discovery.
+          const prune = endpoint.pruneMissing === true && kinds.get(endpoint.id) !== "builtin" && !source.stale && discovered.length > 0
           const existing = editor.get(endpoint.id)?.models ?? new Map<string, Model.Info>()
           editor.models.set(endpoint.id, prune ? discovered.map(model => keepRoute(model, existing.get(model.id))) : mergeDiscoveredModels(discovered, existing))
           continue

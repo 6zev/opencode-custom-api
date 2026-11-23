@@ -36,7 +36,7 @@ Credentials are **references to environment variables**, never literal API keys:
 
 With an empty Options field, the plugin automatically inspects OpenCode's merged provider registry and discovers models for the **custom providers you configured yourself** that have a `settings.baseURL` and use an OpenAI- or Anthropic-style runtime: `@opencode/ai/providers/openai-compatible` (and its `responses` variants), `@opencode/ai/providers/openai`, `@opencode/ai/providers/anthropic`, `@opencode/ai/providers/anthropic-compatible`, and the `aisdk:@ai-sdk/openai-compatible`, `aisdk:@ai-sdk/openai` and `aisdk:@ai-sdk/anthropic` packages that OpenChamber writes.
 
-**Built-in providers are left alone.** OpenCode Zen, OpenCode Go, OpenAI, Anthropic, Google, OpenRouter, GitHub Copilot and every other provider that comes from OpenCode's bundled catalog are never queried and their model lists are never changed. A provider counts as built-in when its ID is one OpenCode ships, or when its models carry catalog-only facts (family, release date, pricing) the first time the plugin sees it. To opt one in anyway, set `settings.modelsDiscovery.enabled: true` on that provider, list its ID in `auto.providers`, or set `auto.builtin: true`. `custom_api_status` lists every skipped provider with the reason.
+**Built-in providers are left alone.** OpenCode Zen, OpenCode Go, OpenAI, Anthropic, Google, OpenRouter, GitHub Copilot and every other provider that comes from OpenCode's bundled catalog are never queried and their model lists are never changed. A provider counts as built-in when its ID is one OpenCode ships, or when its models carry catalog-only facts (family, release date, pricing) the first time the plugin sees it. A provider that uses an `aisdk:` package or points `canonical` at another provider is always treated as custom. To opt one in anyway, set `settings.modelsDiscovery.enabled: true` on that provider, list its ID in `auto.providers`, or set `auto.builtin: true`. `custom_api_status` lists every skipped provider with the reason.
 
 **The plugin never changes how a provider is called.** A provider keeps its own `package`, `settings` and headers; a model you configured keeps its own `package`, `settings`, `headers`, `body` and `compatibility`, and only gains metadata. Discovered models are added without a runtime of their own, so they inherit the provider's. An explicit plugin endpoint whose ID matches an existing provider only adds models to it; it creates a provider (with the OpenCode-native compatible runtime) only when no provider with that ID exists.
 
@@ -61,7 +61,7 @@ Zero-options example:
 }
 ```
 
-That is the whole setup: models appear at startup, are re-checked every 30 minutes, and are re-discovered immediately when the provider or its credential changes. No command has to be run.
+That is the whole setup: the provider's model list mirrors the upstream list. Models appear at startup, are re-checked every 5 minutes, and are re-discovered immediately when the provider or its credential changes: a model the upstream adds shows up, a model it removes disappears, and the placeholder model you typed to create the provider is dropped as soon as the first live list arrives. No command has to be run.
 
 ### Per-provider tuning (`settings.modelsDiscovery`)
 
@@ -74,12 +74,12 @@ Auto-detected providers can be tuned inside their own provider block. Every key 
   "modelsDiscovery": {
     "enabled": true,              // false skips this provider
     "endpoint": "/v1/models",     // absolute URL, or a path resolved from the baseURL origin
-    "refreshIntervalMs": 600000,  // background re-check; 0 disables it (default 1800000)
+    "refreshIntervalMs": 600000,  // background re-check; 0 disables it (default 300000)
     "cacheTtlMs": 300000,
     "timeoutMs": 10000,
     "include": ["^gpt-", "^claude-"],  // case-insensitive regular expressions on the model ID
     "exclude": ["preview$"],           // applied after include
-    "pruneMissing": false,        // true: replace the model list instead of merging into it
+    "pruneMissing": true,         // default. false: keep configured models the upstream does not list
     "catalog": { "my-model": { "context": 131072, "tools": true } }
   }
 }
@@ -91,7 +91,7 @@ Defaults for every auto-detected provider go in the plugin options:
 
 ```jsonc
 "plugins": [
-  { "package": "opencode-custom-api", "options": { "auto": { "refreshIntervalMs": 600000, "exclude": ["embedding"], "pruneMissing": true } } }
+  { "package": "opencode-custom-api", "options": { "auto": { "refreshIntervalMs": 600000, "exclude": ["embedding"], "pruneMissing": false } } }
 ]
 ```
 
@@ -203,7 +203,7 @@ Last successful inventories are stored with a version and timestamp using `ctx.s
 
 Background refresh runs for every source with a positive `refreshIntervalMs`: 30 minutes by default for auto-detected providers, off by default for explicit endpoints. It bypasses the fresh cache, re-registers the provider only when the inventory actually changed, and on failure keeps the previous inventory and logs a warning.
 
-By default discovered models are merged into the provider's configured models, so a model removed from the gateway stays listed. With `pruneMissing: true` the discovered list replaces it. Pruning is skipped whenever the inventory is stale or empty, so an outage never empties a provider.
+For auto-detected providers the discovered list replaces the provider's model list, so models the upstream no longer lists (and placeholders it never listed) are removed. A configured model that the upstream does list keeps its own runtime settings. Set `pruneMissing: false` to merge instead and keep every configured model. The list is never replaced when the inventory is stale or empty, so an outage or an expired key never empties a provider, and a built-in provider that was opted in always keeps its catalog models.
 
 Manual interfaces:
 

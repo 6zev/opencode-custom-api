@@ -50,6 +50,7 @@ describe("built-in providers", () => {
     expect(looksBuiltin({ provider: { id: "opencode-go" }, models: new Map() } as never)).toBe(true)
     expect(looksBuiltin({ provider: { id: "x" }, models: new Map([["a", model("x", "a", { cost: [{ input: 1 }] })]]) } as never)).toBe(true)
     expect(looksBuiltin({ provider: { id: "x" }, models: new Map([["a", model("x", "a")]]) } as never)).toBe(false)
+    expect(looksBuiltin({ provider: { id: "x", package: "aisdk:@ai-sdk/openai-compatible" }, models: new Map([["a", model("x", "a", { family: "gpt" })]]) } as never)).toBe(false)
     expect(looksBuiltin({ provider: { id: "x", canonical: "openai" }, models: new Map([["a", model("x", "a", { family: "gpt" })]]) } as never)).toBe(false)
   })
 

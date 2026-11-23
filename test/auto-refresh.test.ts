@@ -41,7 +41,8 @@ describe("automatic operation", () => {
     vi.stubGlobal("fetch", fetcher)
     const { ctx, ids, provider } = host({ modelsDiscovery: { refreshIntervalMs: 60_000 } })
     const cleanup = await plugin.setup(ctx as never)
-    expect(ids()).toEqual(["a", "hand-written"])
+    // The placeholder typed in to create the provider is not upstream, so it is dropped.
+    expect(ids()).toEqual(["a"])
     const registrations = provider.transform.mock.calls.length
 
     await vi.advanceTimersByTimeAsync(60_000)
@@ -51,13 +52,18 @@ describe("automatic operation", () => {
 
     listed = ["a", "b"]
     await vi.advanceTimersByTimeAsync(60_000)
-    expect(ids()).toEqual(["a", "b", "hand-written"])
+    expect(ids()).toEqual(["a", "b"])
+
+    // Upstream removes a model: it disappears here too.
+    listed = ["b"]
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(ids()).toEqual(["b"])
 
     // An outage keeps the last inventory instead of throwing or emptying the provider.
     vi.spyOn(console, "warn").mockImplementation(() => {})
     fetcher.mockImplementation(async () => new Response("down", { status: 502 }))
     await vi.advanceTimersByTimeAsync(60_000)
-    expect(ids()).toEqual(["a", "b", "hand-written"])
+    expect(ids()).toEqual(["b"])
 
     await cleanup?.()
     const calls = fetcher.mock.calls.length
@@ -67,14 +73,19 @@ describe("automatic operation", () => {
 
   it("prunes models the gateway no longer lists only when asked, and never on an empty or failed inventory", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => respond("a", "b-preview")))
-    const pruned = host({ modelsDiscovery: { pruneMissing: true, exclude: ["preview$"], refreshIntervalMs: 0 } })
+    const pruned = host({ modelsDiscovery: { exclude: ["preview$"], refreshIntervalMs: 0 } })
     const cleanupPruned = await plugin.setup(pruned.ctx as never)
     expect(pruned.ids()).toEqual(["a"])
     await cleanupPruned?.()
 
+    const kept = host({ modelsDiscovery: { pruneMissing: false, refreshIntervalMs: 0 } })
+    const cleanupKept = await plugin.setup(kept.ctx as never)
+    expect(kept.ids()).toEqual(["a", "b-preview", "hand-written"])
+    await cleanupKept?.()
+
     vi.spyOn(console, "warn").mockImplementation(() => {})
     vi.stubGlobal("fetch", vi.fn(async () => new Response("down", { status: 502 })))
-    const failing = host({ modelsDiscovery: { pruneMissing: true, refreshIntervalMs: 0 } })
+    const failing = host({ modelsDiscovery: { refreshIntervalMs: 0 } })
     const cleanupFailing = await plugin.setup(failing.ctx as never)
     expect(failing.ids()).toEqual(["hand-written"])
     await cleanupFailing?.()
@@ -85,12 +96,12 @@ describe("automatic operation", () => {
     vi.stubGlobal("fetch", fetcher)
     const { ctx, ids, tools } = host({}, { auto: { include: ["^gpt"], refreshIntervalMs: 0 } })
     const cleanup = await plugin.setup(ctx as never)
-    expect(ids()).toEqual(["gpt-x", "hand-written"])
+    expect(ids()).toEqual(["gpt-x"])
     const calls = fetcher.mock.calls.length
     const report = JSON.parse((await tools.get("status").execute({}, {})).content)
     expect(fetcher.mock.calls.length).toBe(calls)
     expect(report).toHaveLength(1)
-    expect(report[0]).toMatchObject({ endpoint: "gw", mode: "auto", models: 1, stale: false, refreshIntervalMs: 0, include: ["^gpt"], pruneMissing: false })
+    expect(report[0]).toMatchObject({ endpoint: "gw", mode: "auto", models: 1, stale: false, refreshIntervalMs: 0, include: ["^gpt"], pruneMissing: true })
     expect(typeof report[0].refreshedAt).toBe("string")
     expect(JSON.stringify(report)).not.toContain("apiKey")
     await cleanup?.()
