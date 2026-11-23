@@ -5,6 +5,7 @@ import { loadWithCache } from "./cache.js"
 import { normalizeModel } from "./normalize.js"
 import { autoEndpointFromProvider, credentialSecret, keepRoute, looksBuiltin, mergeDiscoveredModels, type AutoEndpoint } from "./autodiscovery.js"
 import { compilePatterns, filterModels } from "./filter.js"
+import { loadKnownModels, lookupKnown, modelTail, tailKeys, type KnownIndex, type KnownModel } from "./modelsdev.js"
 import type { AutoOptions, DiscoveredModel, EndpointOptions, PluginOptions } from "./types.js"
 
 type Context = PluginTypes.Context
@@ -22,21 +23,36 @@ interface AutoCandidate {
 
 type ProviderRecord = { provider: Provider.Info; models: ReadonlyMap<string, Model.Info> }
 
-const normalizedTail = (id: string) => (id.split("/").at(-1) ?? id).toLowerCase().replace(/^models\//, "").replace(/[_ ]/g, "-")
-
-/** Conservatively resolves an API model against OpenCode's already-normalized host catalog. */
+/**
+ * Resolves an API model against OpenCode's already-normalized host catalog.
+ * Several catalog providers often carry the same model; the one named in the gateway ID wins,
+ * otherwise the most common context size (the smaller one on a tie).
+ */
 export function matchHostModel(id: string, records: readonly ProviderRecord[]): Model.Info | undefined {
   const candidates = records.flatMap(record => [...record.models.values()].map(model => ({ model, provider: record.provider })))
-  const unique = (items: typeof candidates) => items.length === 1 ? items[0]?.model : undefined
+  const segments = new Set(id.toLowerCase().split("/").slice(0, -1))
+  const pick = (items: typeof candidates) => {
+    if (items.length <= 1) return items[0]?.model
+    const named = items.filter(({ model, provider }) => segments.has(provider.id.toLowerCase()) || segments.has(String(model.canonical ?? "").toLowerCase()))
+    if (named.length === 1) return named[0]!.model
+    const counts = new Map<number, number>()
+    const size = (model: Model.Info) => model.limit?.context ?? 0
+    for (const { model } of items) counts.set(size(model), (counts.get(size(model)) ?? 0) + 1)
+    const best = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]![0]
+    return items.find(({ model }) => size(model) === best)!.model
+  }
   const exact = candidates.filter(({ model }) => model.id === id || model.modelID === id)
-  if (exact.length) return unique(exact)
+  if (exact.length) return pick(exact)
   const suffix = candidates.filter(({ model, provider }) => {
     const canonical = model.canonical ?? provider.id
     return id.endsWith(`/${canonical}/${model.modelID}`) || id === `${canonical}/${model.modelID}`
   })
-  if (suffix.length) return unique(suffix)
-  const normalized = normalizedTail(id)
-  return unique(candidates.filter(({ model }) => normalizedTail(model.modelID) === normalized))
+  if (suffix.length) return pick(suffix)
+  for (const key of tailKeys(id)) {
+    const matches = candidates.filter(({ model }) => modelTail(model.modelID) === key)
+    if (matches.length) return pick(matches)
+  }
+  return undefined
 }
 
 const validDuration = (value: unknown, allowZero: boolean) => typeof value === "number" && Number.isFinite(value) && (allowZero ? value >= 0 : value > 0)
@@ -45,7 +61,9 @@ export function parsePluginOptions(value: unknown): PluginOptions {
   if (value === undefined || value === null) return { endpoints: [] }
   if (typeof value !== "object") throw new Error("custom-api: options must be an object")
   const auto = parseAutoOptions((value as { auto?: unknown }).auto)
-  const withAuto = (endpoints: EndpointOptions[]): PluginOptions => auto ? { endpoints, auto } : { endpoints }
+  const modelsDev = (value as { modelsDev?: unknown }).modelsDev
+  if (modelsDev !== undefined && typeof modelsDev !== "boolean" && !(typeof modelsDev === "string" && /^https?:\/\//i.test(modelsDev))) throw new Error("custom-api: modelsDev must be a boolean or an HTTP(S) URL")
+  const withAuto = (endpoints: EndpointOptions[]): PluginOptions => ({ endpoints, ...(auto ? { auto } : {}), ...(modelsDev !== undefined && modelsDev !== true ? { modelsDev } : {}) })
   if (!("endpoints" in value)) return withAuto([])
   if (!Array.isArray((value as PluginOptions).endpoints)) throw new Error("custom-api: options.endpoints must be an array")
   const endpoints = (value as PluginOptions).endpoints
@@ -102,14 +120,15 @@ function runtimeHeaders(endpoint: EndpointOptions): Record<string, string> {
   return headers
 }
 
-function toModel(providerID: Provider.ID, value: DiscoveredModel, catalog?: Model.Info): Model.Info {
+function toModel(providerID: Provider.ID, value: DiscoveredModel, catalog?: Model.Info, known?: KnownModel): Model.Info {
   const hostCapabilities = catalog?.capabilities
   const hostLimit = catalog?.limit
-  const context = value.provenance.context === "default" && hostLimit ? hostLimit.context : value.context
-  const output = value.provenance.output === "default" && hostLimit ? hostLimit.output : value.output
-  const tools = value.provenance.tools === "default" && hostCapabilities ? hostCapabilities.tools : value.tools
-  const input = value.provenance.input === "default" && hostCapabilities ? [...hostCapabilities.input] : value.input
-  const reasoning = value.provenance.reasoning === "default" && catalog ? catalog.variants.length > 0 : value.reasoning
+  const unset = (field: string) => value.provenance[field] === "default"
+  const context = unset("context") ? hostLimit?.context || known?.context || value.context : value.context
+  const output = unset("output") ? hostLimit?.output || known?.output || value.output : value.output
+  const tools = unset("tools") ? hostCapabilities?.tools ?? known?.tools ?? value.tools : value.tools
+  const input = unset("input") ? [...(hostCapabilities?.input ?? known?.input ?? value.input)] : value.input
+  const reasoning = unset("reasoning") ? (catalog ? catalog.variants.length > 0 : known?.reasoning ?? value.reasoning) : value.reasoning
   const variants = reasoning ? catalog?.variants.length ? catalog.variants.map(variant => ({ ...variant })) : reasoningVariants(value.id) : []
   return {
     ...Model.Info.default(providerID, Model.ID.make(value.id)),
@@ -187,6 +206,9 @@ export default Plugin.define({
     let forceReconcile = false
     let queued = false
     const hostRecords = new Map<string, ProviderRecord>()
+    /** Public models.dev catalog, used only for fields neither the gateway nor OpenCode's own catalog supplies. */
+    let known: KnownIndex = {}
+    let knownError: string | undefined
     /** First-sight classification, taken before this plugin has touched the provider. */
     const kinds = new Map<string, "builtin" | "custom">()
     /** Explicit endpoints whose ID already belonged to a configured provider. */
@@ -206,7 +228,7 @@ export default Plugin.define({
         const endpoint = source.endpoint
         const id = Provider.ID.make(endpoint.id)
         const catalog = [...hostRecords.values()]
-        const discovered = source.models.map(model => toModel(id, model, matchHostModel(model.id, catalog)))
+        const discovered = source.models.map(model => toModel(id, model, matchHostModel(model.id, catalog), lookupKnown(known, model.id)))
         if (source.auto) {
           // Pruning only happens on a live, non-empty inventory so an outage never empties a provider.
           // A built-in provider that was opted in keeps its catalog models; only its additions come from discovery.
@@ -406,8 +428,11 @@ export default Plugin.define({
         ...(state?.refreshedAt ? { refreshedAt: new Date(state.refreshedAt).toISOString() } : {}),
         ...(state?.error ? { error: state.error } : {}),
         metadata: provenance,
+        // Models with no context size from the gateway that the models.dev catalog recognises.
+        knownByModelsDev: source.models.filter(model => model.provenance.context === "default" && lookupKnown(known, model.id)).length,
       }
-    }), ...[...skipped].map(([endpoint, reason]) => ({ endpoint, mode: "skipped", reason }))]
+    }), ...[...skipped].map(([endpoint, reason]) => ({ endpoint, mode: "skipped", reason })),
+    ...(config.modelsDev === false ? [] : [{ endpoint: "models.dev", mode: "metadata", models: Object.keys(known).length, ...(knownError ? { error: knownError } : {}) }])]
 
     const toolRegistration = await ctx.tool.transform(editor => {
       editor.namespace({ name: "custom_api", description: "Custom API endpoint inventory management" })
@@ -440,6 +465,16 @@ export default Plugin.define({
 
     // Hydrate providers already present in the core registry before setup returns so
     // sessions cannot select a discovered model during an empty startup window.
+    if (config.modelsDev !== false) {
+      const loading = loadKnownModels({ get: key => ctx.storage.get(key), set: (key, value) => ctx.storage.set(key, value as never) }, typeof config.modelsDev === "string" ? config.modelsDev : undefined, lifecycle.signal)
+        .then(result => { known = result.index; knownError = result.error; return true })
+        .catch(error => { knownError = error instanceof Error ? error.message : String(error); return true })
+      // Wait briefly so the first model list already carries the catalog facts; a slow download fills them in afterwards.
+      let waiting: ReturnType<typeof setTimeout> | undefined
+      const ready = await Promise.race([loading, new Promise<false>(resolve => { waiting = setTimeout(() => resolve(false), 8_000) })])
+      clearTimeout(waiting)
+      if (!ready) void loading.then(() => { if (!lifecycle.signal.aborted && Object.keys(known).length) queue = queue.then(registerAtTail).catch(() => {}) })
+    }
     forceReconcile = true
     await reconcile()
 

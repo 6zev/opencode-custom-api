@@ -59,7 +59,12 @@ export interface AutoOptions {
   /** When present, only these provider IDs are auto-discovered. */
   providers?: string[]
 }
-export interface PluginOptions { endpoints: EndpointOptions[]; auto?: AutoOptions }
+export interface PluginOptions {
+  endpoints: EndpointOptions[]
+  auto?: AutoOptions
+  /** `false` turns off the models.dev metadata fallback; a URL points it at a mirror. On by default. */
+  modelsDev?: boolean | string
+}
 export interface DiscoveredModel {
   id: string
   name: string

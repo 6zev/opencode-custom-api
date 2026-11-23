@@ -5,3 +5,4 @@ export { normalizeModel, normalizeCatalogID, isImageOnly, isNonChat } from "./no
 export { compilePatterns, filterModels } from "./filter.js"
 export { DEFAULT_AUTO_REFRESH_MS, looksBuiltin } from "./autodiscovery.js"
 export { loadWithCache, validCache } from "./cache.js"
+export { buildIndex, lookupKnown, loadKnownModels, MODELS_DEV_URL } from "./modelsdev.js"

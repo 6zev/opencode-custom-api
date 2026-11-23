@@ -5,7 +5,7 @@ import { matchHostModel, parsePluginOptions } from "../src/plugin.js"
 afterEach(() => vi.restoreAllMocks())
 
 describe("plugin surface", () => {
-  it("matches host catalog identities conservatively and rejects ambiguous tails", () => {
+  it("matches host catalog identities and settles shared names by provider, then by consensus", () => {
     const model = (providerID: string, id: string, canonical?: string) => ({ id, modelID: id, providerID, canonical, variants: [], name: id }) as any
     const records = [
       { provider: { id: "openai" } as any, models: new Map([["gpt-5", model("openai", "gpt-5", "openai")]]) },
@@ -15,7 +15,18 @@ describe("plugin surface", () => {
     expect(matchHostModel("openai/gpt-5", records)?.modelID).toBe("gpt-5")
     expect(matchHostModel("gateway/openai/gpt-5", records)?.modelID).toBe("gpt-5")
     expect(matchHostModel("GPT_5", records)?.modelID).toBe("gpt-5")
-    expect(matchHostModel("same", records)).toBeUndefined()
+    // Two catalog providers carry the same model: the one named in the gateway ID wins, otherwise the common (or smaller) context.
+    const sized = (providerID: string, context: number) => ({ ...model(providerID, "same"), limit: { context, output: 1 } })
+    const shared = [
+      { provider: { id: "other" } as any, models: new Map([["same", sized("other", 200_000)]]) },
+      { provider: { id: "third" } as any, models: new Map([["same", sized("third", 128_000)]]) },
+      { provider: { id: "fourth" } as any, models: new Map([["same", sized("fourth", 200_000)]]) },
+    ]
+    expect(matchHostModel("same", shared)?.limit.context).toBe(200_000)
+    expect(matchHostModel("gw/third/same", shared)?.providerID).toBe("third")
+    expect(matchHostModel("gw/same", shared.slice(0, 2))?.limit.context).toBe(128_000)
+    expect(matchHostModel("gw/same:free", shared)?.limit.context).toBe(200_000)
+    expect(matchHostModel("gw/same-free", shared)?.limit.context).toBe(200_000)
     expect(matchHostModel("gpt-5-plus", records)).toBeUndefined()
   })
 

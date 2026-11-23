@@ -39,7 +39,7 @@ function host(options: unknown = {}, zenSettings: Record<string, unknown> = {}) 
   }
   const registration = vi.fn(async (callback: (editor: any) => void) => { callback({ namespace: vi.fn(), add: (tool: any) => tools.set(tool.name, tool) }); return { dispose: vi.fn(async () => {}) } })
   const event = { subscribe: ({ signal }: { signal: AbortSignal }) => ({ async *[Symbol.asyncIterator]() { await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })) } }) }
-  const ctx = { options, provider, tool: { transform: registration }, command: { transform: registration }, event, storage: { get: vi.fn(async () => undefined), set: vi.fn(async () => {}) }, integration: { connection: { active: vi.fn(async () => undefined), resolve: vi.fn(async () => undefined) } } }
+  const ctx = { options: { modelsDev: false, ...(options as object) }, provider, tool: { transform: registration }, command: { transform: registration }, event, storage: { get: vi.fn(async () => undefined), set: vi.fn(async () => {}) }, integration: { connection: { active: vi.fn(async () => undefined), resolve: vi.fn(async () => undefined) } } }
   return { ctx, tools, record: (id: string) => fold().get(id) }
 }
 const fetcher = () => vi.fn(async (url: any) => new Response(JSON.stringify({ data: [{ id: "mine" }, { id: "found" }] }), { status: 200, headers: { "content-type": "application/json", "x-url": String(url) } }))

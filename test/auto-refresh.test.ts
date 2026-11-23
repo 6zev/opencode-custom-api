@@ -27,7 +27,7 @@ function host(settings: Record<string, unknown>, options: unknown = {}) {
   }
   const registration = vi.fn(async (callback: (editor: any) => void) => { callback({ namespace: vi.fn(), add: (tool: any) => tools.set(tool.name, tool) }); return { dispose: vi.fn(async () => {}) } })
   const event = { subscribe: ({ signal }: { signal: AbortSignal }) => ({ async *[Symbol.asyncIterator]() { await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })) } }) }
-  const ctx = { options, provider, tool: { transform: registration }, command: { transform: registration }, event, storage: { get: vi.fn(async () => undefined), set: vi.fn(async () => {}) }, integration: { connection: { active: vi.fn(async () => undefined), resolve: vi.fn() } } }
+  const ctx = { options: { modelsDev: false, ...(options as object) }, provider, tool: { transform: registration }, command: { transform: registration }, event, storage: { get: vi.fn(async () => undefined), set: vi.fn(async () => {}) }, integration: { connection: { active: vi.fn(async () => undefined), resolve: vi.fn() } } }
   const ids = () => [...fold().find(record => record.provider.id === "gw")!.models.keys()].sort()
   return { ctx, ids, tools, provider }
 }

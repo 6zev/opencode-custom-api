@@ -191,11 +191,16 @@ OpenChamber's provider connection UI stores saved OpenCode credentials in OpenCo
 
   `supported_parameters` is treated as complete (a model that does not list `tools` has no tools); a capability *list* only proves what it contains.
 - Entries the endpoint itself marks as non-chat are excluded: image-generation-only output, `mode`/`type` of embedding, rerank, moderation, speech or transcription, and new-api `supported_endpoint_types` containing only such types. Nothing is excluded by guessing from the model ID; use `exclude` for that.
-- Metadata precedence is: explicit endpoint metadata (including explicit `false`/empty values) → exact or uniquely normalized endpoint catalog key → OpenCode's host-normalized models.dev metadata → narrow conservative heuristic/default.
+- Metadata precedence is: explicit endpoint metadata (including explicit `false`/empty values) → exact or uniquely normalized endpoint catalog key → OpenCode's host-normalized models.dev metadata → the public models.dev catalog → narrow conservative heuristic/default.
 - Normalized catalog matching only lowercases, removes a leading `models/`, and normalizes spaces/underscores to hyphens. It does not use substring/fuzzy matching.
 - Conservative defaults are 32,768 context tokens, 4,096 output tokens, text input, no tools, and no reasoning. Only IDs beginning with `o1`…`o9`, or containing the complete word `reasoner`/`reasoning`, infer reasoning.
 
-OpenCode V2 already bundles, caches, and normalizes models.dev. The plugin reuses those host provider records and never performs a second catalog download or stores a duplicate catalog. Matching is conservative: exact model identity first, then a canonical-provider suffix, then a unique normalized tail; ambiguous matches are rejected and there is no fuzzy token matching. Host variants are copied wholesale (including settings, body, and headers). When there is no host match/variant, documented family fallbacks remain: GPT-5-style models use `low`/`medium`/`high`/`xhigh`, while Kimi K3 uses `low`/`high`/`max`.
+OpenCode V2 already bundles and normalizes models.dev, but only for the providers in its own registry, and a gateway usually returns a bare list (`id`, `owned_by`) for most of its models. So the plugin fills the remaining gaps in two steps:
+
+1. **Host catalog.** Exact model identity first, then a canonical `provider/model` suffix, then the last ID segment. When several catalog providers carry the same model, the one named in the gateway ID wins; otherwise the most common context size is used (the smaller one on a tie). Matched models also copy the host's reasoning variants.
+2. **models.dev.** The plugin downloads `https://models.dev/api.json` once a day, reduces it to one consensus record per model name (context, output, tools, reasoning, input types) and stores only that small index. A gateway ID is looked up by its last segment, then without a routing tag or marker, so `some-channel/deepseek-v4.1-flash:free` and `…-free` resolve to the base model when no exact entry exists. Nothing but the download itself is sent to models.dev; no model IDs, keys or gateway addresses leave the machine. If the download fails, the last stored copy is used.
+
+Values the gateway states itself are never overridden. Models that neither catalog knows keep the conservative defaults; give those a `catalog` entry. Turn the download off with `"options": { "modelsDev": false }`, or point it at a mirror with `"modelsDev": "https://…/api.json"`. `custom_api_status` reports how many models the catalog recognised (`knownByModelsDev`) and whether the download worked.
 
 ## Cache and refresh
 
