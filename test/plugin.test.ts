@@ -25,8 +25,10 @@ describe("plugin surface", () => {
     expect(matchHostModel("same", shared)?.limit.context).toBe(200_000)
     expect(matchHostModel("gw/third/same", shared)?.providerID).toBe("third")
     expect(matchHostModel("gw/same", shared.slice(0, 2))?.limit.context).toBe(128_000)
-    expect(matchHostModel("gw/same:free", shared)?.limit.context).toBe(200_000)
-    expect(matchHostModel("gw/same-free", shared)?.limit.context).toBe(200_000)
+    // A suffix is part of the name: it is never removed to reach the base model.
+    expect(matchHostModel("gw/same:free", shared)).toBeUndefined()
+    expect(matchHostModel("gw/same-free", shared)).toBeUndefined()
+    expect(matchHostModel("gw/same-latest", shared)).toBeUndefined()
     expect(matchHostModel("gpt-5-plus", records)).toBeUndefined()
   })
 

@@ -22,10 +22,12 @@ describe("models.dev fallback", () => {
     expect(buildIndex("nope")).toEqual({})
   })
 
-  it("finds a model by its last ID segment, then without a routing tag or -free marker", () => {
+  it("finds a model by its last ID segment and never removes a suffix", () => {
     const index = buildIndex(api)
     expect(lookupKnown(index, "opencode2api/deepseek-v4.1-flash-free")?.context).toBe(200_000)
-    expect(lookupKnown(index, "tokenharbor/deepseek-v4.1-flash:free")?.context).toBe(1_048_576)
+    expect(lookupKnown(index, "tokenharbor/deepseek-v4.1-flash:free")).toBeUndefined()
+    expect(lookupKnown(index, "x/deepseek-v4.1-flash-latest")).toBeUndefined()
+    expect(lookupKnown(index, "chan/sub/deepseek-v4.1-flash")?.context).toBe(1_048_576)
     expect(lookupKnown(index, "SiliconFlow/deepseek-ai/DeepSeek-V4.1-Flash")?.reasoning).toBe(true)
     expect(lookupKnown(index, "gw/kimi-k9-free")).toBeUndefined()
     expect(lookupKnown(index, "constructor")).toBeUndefined()
@@ -82,7 +84,7 @@ describe("models.dev fallback", () => {
     expect(flash.limit).toMatchObject({ context: 200_000, output: 32_000 })
     expect(flash.capabilities.tools).toBe(true)
     expect(models.get("chan/deepseek-v4.1-flash").limit.context).toBe(1_048_576)
-    expect(models.get("chan/deepseek-v4.1-flash:batch").limit.context).toBe(1_048_576)
+    expect(models.get("chan/deepseek-v4.1-flash:batch").limit.context).toBe(32_768)
     expect(flash.variants.length).toBeGreaterThan(0)
     // What the gateway states is never overridden by the catalog.
     expect(models.get("has/own").limit).toMatchObject({ context: 64_000, output: 8_000 })
@@ -90,7 +92,7 @@ describe("models.dev fallback", () => {
     expect(models.get("nobody/knows-this").limit.context).toBe(32_768)
     expect(hosts).toContain("models.dev")
     const report = JSON.parse((await tools.find(tool => tool.name === "status").execute({}, {})).content)
-    expect(report.find((item: any) => item.endpoint === "gw")).toMatchObject({ knownByModelsDev: 3 })
+    expect(report.find((item: any) => item.endpoint === "gw")).toMatchObject({ knownByModelsDev: 2 })
     expect(report.at(-1)).toMatchObject({ endpoint: "models.dev", mode: "metadata" })
     await cleanup?.()
   })

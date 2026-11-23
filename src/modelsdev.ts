@@ -11,15 +11,8 @@ const TTL = 86_400_000
 const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0
 
-/** Last path segment, lower-cased: the part of a gateway model ID that names the model itself. */
+/** Last path segment, lower-cased: the part of a gateway model ID that names the model itself. Suffixes are never removed. */
 export const modelTail = (id: string) => (id.split("/").at(-1) ?? id).toLowerCase().replace(/^models\//, "").replace(/[_ ]/g, "-")
-
-/** The tail as written, then without a routing tag (`:free`, `:batch`) or a `-free` / `-latest` marker. */
-export function tailKeys(id: string): string[] {
-  const tail = modelTail(id)
-  const bare = tail.replace(/:[a-z0-9.-]+$/, "").replace(/-(?:free|latest)$/, "")
-  return bare && bare !== tail ? [tail, bare] : [tail]
-}
 
 /** Most common value; a tie goes to the smaller one so a guess never overstates a limit. */
 function majority(values: number[]): number | undefined {
@@ -65,10 +58,10 @@ export function buildIndex(api: unknown): KnownIndex {
   return index
 }
 
-/** `exact` only accepts the model name as written; otherwise the name without its tag or marker is tried too. */
-export function lookupKnown(index: KnownIndex, id: string, exact = false): KnownModel | undefined {
-  for (const key of exact ? [modelTail(id)] : tailKeys(id)) if (Object.hasOwn(index, key)) return index[key]
-  return undefined
+/** Looks a gateway ID up by its model name: channel prefixes are dropped, the name itself (including any `-free`, `:free` or `-latest`) is kept as written. */
+export function lookupKnown(index: KnownIndex, id: string): KnownModel | undefined {
+  const key = modelTail(id)
+  return Object.hasOwn(index, key) ? index[key] : undefined
 }
 
 function validIndex(value: unknown): value is { savedAt: number; index: KnownIndex } {

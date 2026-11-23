@@ -5,7 +5,7 @@ import { loadWithCache } from "./cache.js"
 import { normalizeModel } from "./normalize.js"
 import { autoEndpointFromProvider, credentialSecret, keepRoute, looksBuiltin, mergeDiscoveredModels, type AutoEndpoint } from "./autodiscovery.js"
 import { compilePatterns, filterModels } from "./filter.js"
-import { loadKnownModels, lookupKnown, modelTail, tailKeys, type KnownIndex, type KnownModel } from "./modelsdev.js"
+import { loadKnownModels, lookupKnown, modelTail, type KnownIndex, type KnownModel } from "./modelsdev.js"
 import type { AutoOptions, DiscoveredModel, EndpointOptions, PluginOptions } from "./types.js"
 
 type Context = PluginTypes.Context
@@ -27,9 +27,9 @@ type ProviderRecord = { provider: Provider.Info; models: ReadonlyMap<string, Mod
  * Resolves an API model against OpenCode's already-normalized host catalog.
  * Several catalog providers often carry the same model; the one named in the gateway ID wins,
  * otherwise the most common context size (the smaller one on a tie).
- * `asWritten` refuses to fall back to the name without its `:tag` / `-free` / `-latest` marker.
+ * Only channel prefixes are dropped; a suffix such as `-free`, `:free` or `-latest` is part of the name and is never removed.
  */
-export function matchHostModel(id: string, records: readonly ProviderRecord[], asWritten = false): Model.Info | undefined {
+export function matchHostModel(id: string, records: readonly ProviderRecord[]): Model.Info | undefined {
   const candidates = records.flatMap(record => [...record.models.values()].map(model => ({ model, provider: record.provider })))
   const segments = new Set(id.toLowerCase().split("/").slice(0, -1))
   const pick = (items: typeof candidates) => {
@@ -49,10 +49,9 @@ export function matchHostModel(id: string, records: readonly ProviderRecord[], a
     return id.endsWith(`/${canonical}/${model.modelID}`) || id === `${canonical}/${model.modelID}`
   })
   if (suffix.length) return pick(suffix)
-  for (const key of asWritten ? [modelTail(id)] : tailKeys(id)) {
-    const matches = candidates.filter(({ model }) => modelTail(model.modelID) === key)
-    if (matches.length) return pick(matches)
-  }
+  const key = modelTail(id)
+  const matches = candidates.filter(({ model }) => modelTail(model.modelID) === key)
+  if (matches.length) return pick(matches)
   return undefined
 }
 
@@ -229,13 +228,7 @@ export default Plugin.define({
         const endpoint = source.endpoint
         const id = Provider.ID.make(endpoint.id)
         const catalog = [...hostRecords.values()]
-        // A model name as written always beats a name with its marker stripped, whichever catalog it is in:
-        // "x-free" often has smaller limits than "x", so the base model is only a last resort.
-        const discovered = source.models.map(model => {
-          const host = matchHostModel(model.id, catalog, true)
-          const named = host ? undefined : lookupKnown(known, model.id, true)
-          return toModel(id, model, host ?? (named ? undefined : matchHostModel(model.id, catalog)), named ?? lookupKnown(known, model.id))
-        })
+        const discovered = source.models.map(model => toModel(id, model, matchHostModel(model.id, catalog), lookupKnown(known, model.id)))
         if (source.auto) {
           // Pruning only happens on a live, non-empty inventory so an outage never empties a provider.
           // A built-in provider that was opted in keeps its catalog models; only its additions come from discovery.
