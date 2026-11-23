@@ -56,6 +56,8 @@ describe("models.dev fallback", () => {
       { id: "opencode2api/deepseek-v4.1-flash-free", object: "model" },
       { id: "has/own", context_length: 64_000, max_output_tokens: 8_000, reasoning: false, tool_call: false },
       { id: "nobody/knows-this" },
+      { id: "chan/deepseek-v4.1-flash" },
+      { id: "chan/deepseek-v4.1-flash:batch" },
     ] }
     const hosts: string[] = []
     vi.stubGlobal("fetch", vi.fn(async (url: unknown) => { const host = new URL(String(url)).host; hosts.push(host); return new Response(JSON.stringify(host === "models.dev" ? { ...api, x: { models: { own: { limit: { context: 999_999, output: 9 }, reasoning: true, tool_call: true } } } } : gateway)) }))
@@ -66,6 +68,8 @@ describe("models.dev fallback", () => {
       for (const transform of transforms) transform(editor)
       return records
     }
+    // The host catalog only knows the base model (1M); the catalog entry for the "-free" name must win over it.
+    transforms.push(editor => editor.add({ info: { id: "deepseek", name: "DeepSeek", activation: "enabled", package: "@opencode/ai/providers/deepseek", settings: {} }, models: [{ id: "deepseek-v4.1-flash", modelID: "deepseek-v4.1-flash", providerID: "deepseek", name: "Flash", family: "deepseek", variants: [{ id: "high", settings: {} }], cost: [], time: { released: 1 }, capabilities: { tools: true, input: ["text"], output: ["text"] }, limit: { context: 1_048_576, output: 384_000 } }] }))
     transforms.push(editor => editor.add({ info: { id: "gw", name: "GW", activation: "enabled", package: "aisdk:@ai-sdk/openai-compatible", settings: { baseURL: "https://gw.example/v1", modelsDiscovery: { refreshIntervalMs: 0 } } }, models: [] }))
     const provider = { transform: vi.fn(async (cb: any) => { transforms.push(cb); fold(); return { dispose: async () => { const i = transforms.indexOf(cb); if (i >= 0) transforms.splice(i, 1) } } }), list: vi.fn(async () => ({ location: {}, data: [...fold().values()].map(r => r.provider) })) }
     const tools: any[] = []
@@ -77,6 +81,8 @@ describe("models.dev fallback", () => {
     const flash = models.get("opencode2api/deepseek-v4.1-flash-free")
     expect(flash.limit).toMatchObject({ context: 200_000, output: 32_000 })
     expect(flash.capabilities.tools).toBe(true)
+    expect(models.get("chan/deepseek-v4.1-flash").limit.context).toBe(1_048_576)
+    expect(models.get("chan/deepseek-v4.1-flash:batch").limit.context).toBe(1_048_576)
     expect(flash.variants.length).toBeGreaterThan(0)
     // What the gateway states is never overridden by the catalog.
     expect(models.get("has/own").limit).toMatchObject({ context: 64_000, output: 8_000 })
@@ -84,7 +90,7 @@ describe("models.dev fallback", () => {
     expect(models.get("nobody/knows-this").limit.context).toBe(32_768)
     expect(hosts).toContain("models.dev")
     const report = JSON.parse((await tools.find(tool => tool.name === "status").execute({}, {})).content)
-    expect(report[0]).toMatchObject({ endpoint: "gw", knownByModelsDev: 1 })
+    expect(report.find((item: any) => item.endpoint === "gw")).toMatchObject({ knownByModelsDev: 3 })
     expect(report.at(-1)).toMatchObject({ endpoint: "models.dev", mode: "metadata" })
     await cleanup?.()
   })

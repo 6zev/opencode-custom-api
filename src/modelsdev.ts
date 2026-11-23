@@ -65,8 +65,9 @@ export function buildIndex(api: unknown): KnownIndex {
   return index
 }
 
-export function lookupKnown(index: KnownIndex, id: string): KnownModel | undefined {
-  for (const key of tailKeys(id)) if (Object.hasOwn(index, key)) return index[key]
+/** `exact` only accepts the model name as written; otherwise the name without its tag or marker is tried too. */
+export function lookupKnown(index: KnownIndex, id: string, exact = false): KnownModel | undefined {
+  for (const key of exact ? [modelTail(id)] : tailKeys(id)) if (Object.hasOwn(index, key)) return index[key]
   return undefined
 }
 
