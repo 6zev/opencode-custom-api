@@ -1,6 +1,6 @@
 {
   "name": "opencode-custom-api",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Discover custom OpenAI- and Anthropic-compatible model endpoints in OpenCode V2",
   "type": "module",
   "license": "MIT",

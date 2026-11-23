@@ -34,7 +34,11 @@ For local development, clone this repository and run `npm install && npm run bui
 
 Credentials are **references to environment variables**, never literal API keys:
 
-With an empty Options field, the plugin automatically inspects OpenCode's merged provider registry. It discovers models for custom providers using `@opencode/ai/providers/openai-compatible`, `@opencode/ai/providers/openai`, `@opencode/ai/providers/anthropic-compatible`, or OpenChamber's legacy `aisdk:@ai-sdk/openai` runtime when `settings.baseURL` is present. OpenCode may normalize the legacy AI SDK package to its native OpenAI runtime; both forms are recognized. Explicit plugin endpoints remain available and override an auto-detected provider with the same ID.
+With an empty Options field, the plugin automatically inspects OpenCode's merged provider registry and discovers models for the **custom providers you configured yourself** that have a `settings.baseURL` and use an OpenAI- or Anthropic-style runtime: `@opencode/ai/providers/openai-compatible` (and its `responses` variants), `@opencode/ai/providers/openai`, `@opencode/ai/providers/anthropic`, `@opencode/ai/providers/anthropic-compatible`, and the `aisdk:@ai-sdk/openai-compatible`, `aisdk:@ai-sdk/openai` and `aisdk:@ai-sdk/anthropic` packages that OpenChamber writes.
+
+**Built-in providers are left alone.** OpenCode Zen, OpenCode Go, OpenAI, Anthropic, Google, OpenRouter, GitHub Copilot and every other provider that comes from OpenCode's bundled catalog are never queried and their model lists are never changed. A provider counts as built-in when its ID is one OpenCode ships, or when its models carry catalog-only facts (family, release date, pricing) the first time the plugin sees it. To opt one in anyway, set `settings.modelsDiscovery.enabled: true` on that provider, list its ID in `auto.providers`, or set `auto.builtin: true`. `custom_api_status` lists every skipped provider with the reason.
+
+**The plugin never changes how a provider is called.** A provider keeps its own `package`, `settings` and headers; a model you configured keeps its own `package`, `settings`, `headers`, `body` and `compatibility`, and only gains metadata. Discovered models are added without a runtime of their own, so they inherit the provider's. An explicit plugin endpoint whose ID matches an existing provider only adds models to it; it creates a provider (with the OpenCode-native compatible runtime) only when no provider with that ID exists.
 
 Zero-options example:
 
@@ -91,7 +95,7 @@ Defaults for every auto-detected provider go in the plugin options:
 ]
 ```
 
-`auto` accepts `enabled`, `timeoutMs`, `cacheTtlMs`, `refreshIntervalMs`, `include`, `exclude`, and `pruneMissing`. With `"auto": { "enabled": false }`, only providers that set `modelsDiscovery.enabled: true` are discovered.
+`auto` accepts `enabled`, `timeoutMs`, `cacheTtlMs`, `refreshIntervalMs`, `include`, `exclude`, `pruneMissing`, `builtin` (default `false`: also discover OpenCode's built-in providers) and `providers` (when set, only these provider IDs are auto-discovered). With `"auto": { "enabled": false }`, only providers that set `modelsDiscovery.enabled: true` are discovered.
 
 ### Using it with OpenChamber
 

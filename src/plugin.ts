@@ -3,7 +3,7 @@ import type { Plugin as PluginTypes } from "@opencode/plugin"
 import { discover } from "./discovery.js"
 import { loadWithCache } from "./cache.js"
 import { normalizeModel } from "./normalize.js"
-import { autoEndpointFromProvider, credentialSecret, mergeDiscoveredModels, type AutoEndpoint } from "./autodiscovery.js"
+import { autoEndpointFromProvider, credentialSecret, keepRoute, looksBuiltin, mergeDiscoveredModels, type AutoEndpoint } from "./autodiscovery.js"
 import { compilePatterns, filterModels } from "./filter.js"
 import type { AutoOptions, DiscoveredModel, EndpointOptions, PluginOptions } from "./types.js"
 
@@ -79,6 +79,8 @@ function parseAutoOptions(value: unknown): AutoOptions | undefined {
   const auto = value as AutoOptions
   if (auto.enabled !== undefined && typeof auto.enabled !== "boolean") throw new Error("custom-api: auto.enabled must be a boolean")
   if (auto.pruneMissing !== undefined && typeof auto.pruneMissing !== "boolean") throw new Error("custom-api: auto.pruneMissing must be a boolean")
+  if (auto.builtin !== undefined && typeof auto.builtin !== "boolean") throw new Error("custom-api: auto.builtin must be a boolean")
+  if (auto.providers !== undefined && (!Array.isArray(auto.providers) || !auto.providers.every(item => typeof item === "string"))) throw new Error("custom-api: auto.providers must be an array of provider IDs")
   if (auto.timeoutMs !== undefined && !validDuration(auto.timeoutMs, false)) throw new Error("custom-api: auto.timeoutMs must be finite and positive")
   if (auto.cacheTtlMs !== undefined && !validDuration(auto.cacheTtlMs, true)) throw new Error("custom-api: auto.cacheTtlMs must be finite and nonnegative")
   if (auto.refreshIntervalMs !== undefined && !validDuration(auto.refreshIntervalMs, true)) throw new Error("custom-api: auto.refreshIntervalMs must be finite and nonnegative")
@@ -185,6 +187,11 @@ export default Plugin.define({
     let forceReconcile = false
     let queued = false
     const hostRecords = new Map<string, ProviderRecord>()
+    /** First-sight classification, taken before this plugin has touched the provider. */
+    const kinds = new Map<string, "builtin" | "custom">()
+    /** Explicit endpoints whose ID already belonged to a configured provider. */
+    const preexisting = new Map<string, boolean>()
+    const skipped = new Map<string, string>()
     const health = new Map<string, { refreshedAt?: number; error?: string }>()
     const timers = new Map<string, { interval: number; timer: ReturnType<typeof setInterval> }>()
     const succeeded = (id: string) => health.set(id, { refreshedAt: Date.now() })
@@ -192,6 +199,7 @@ export default Plugin.define({
 
     const applyProviders = (editor: Parameters<Parameters<typeof ctx.provider.transform>[0]>[0]) => {
       const owned = new Set(sources().map(source => source.endpoint.id))
+      for (const record of editor.list()) if (!kinds.has(record.provider.id)) kinds.set(record.provider.id, looksBuiltin(record) ? "builtin" : "custom")
       hostRecords.clear()
       for (const record of editor.list()) if (!owned.has(record.provider.id)) hostRecords.set(record.provider.id, record)
       for (const source of sources()) {
@@ -202,7 +210,14 @@ export default Plugin.define({
         if (source.auto) {
           // Pruning only happens on a live, non-empty inventory so an outage never empties a provider.
           const prune = endpoint.pruneMissing === true && !source.stale && discovered.length > 0
-          editor.models.set(endpoint.id, prune ? discovered : mergeDiscoveredModels(discovered, editor.get(endpoint.id)?.models ?? new Map()))
+          const existing = editor.get(endpoint.id)?.models ?? new Map<string, Model.Info>()
+          editor.models.set(endpoint.id, prune ? discovered.map(model => keepRoute(model, existing.get(model.id))) : mergeDiscoveredModels(discovered, existing))
+          continue
+        }
+        if (!preexisting.has(endpoint.id)) preexisting.set(endpoint.id, editor.get(endpoint.id) !== undefined)
+        if (preexisting.get(endpoint.id)) {
+          // The ID belongs to a provider the user already configured: add models, keep its runtime and settings.
+          editor.models.set(endpoint.id, mergeDiscoveredModels(discovered, editor.get(endpoint.id)?.models ?? new Map()))
           continue
         }
         editor.add({
@@ -238,10 +253,28 @@ export default Plugin.define({
       const inventoryChanged = providerInventory !== nextInventory
       providerInventory = nextInventory
       const nextCandidates = new Map<string, AutoCandidate>()
-      for (const provider of listed.data) {
+      const eligible = listed.data.flatMap(provider => {
         const auto = autoEndpointFromProvider(provider, configured, config.auto)
-        if (auto) nextCandidates.set(auto.endpoint.id, { auto, fingerprint: fingerprint(provider as Provider.Info, auto) })
+        return auto ? [{ provider, auto }] : []
+      })
+      // A provider first seen here has not been classified yet; one registration pass does that.
+      if (eligible.some(({ provider }) => !kinds.has(provider.id))) await registerAtTail()
+      if (lifecycle.signal.aborted) return
+      skipped.clear()
+      const allowed = config.auto?.providers
+      for (const { provider, auto } of eligible) {
+        const id = auto.endpoint.id
+        const forced = (provider.settings?.modelsDiscovery as { enabled?: unknown } | undefined)?.enabled === true
+        const listedExplicitly = allowed?.includes(id) === true
+        if (!forced && allowed && !listedExplicitly) { skipped.set(id, "not listed in auto.providers"); continue }
+        if (!forced && !listedExplicitly && config.auto?.builtin !== true && kinds.get(id) !== "custom") {
+          skipped.set(id, kinds.get(id) === "builtin" ? "built-in provider" : "not classified yet")
+          continue
+        }
+        nextCandidates.set(id, { auto, fingerprint: fingerprint(provider as Provider.Info, auto) })
       }
+      const present = new Set(listed.data.map(provider => provider.id))
+      for (const id of kinds.keys()) if (!present.has(id) && !explicit.has(id)) kinds.delete(id)
       candidates = nextCandidates
       const force = forceReconcile
       forceReconcile = false
@@ -352,7 +385,7 @@ export default Plugin.define({
       }
     }
 
-    const status = () => sources().map(source => {
+    const status = () => [...sources().map(source => {
       const provenance: Record<string, number> = {}
       for (const model of source.models) for (const field of ["context", "tools", "reasoning", "input"] as const) {
         const key = `${field}:${model.provenance[field] ?? "default"}`
@@ -373,7 +406,7 @@ export default Plugin.define({
         ...(state?.error ? { error: state.error } : {}),
         metadata: provenance,
       }
-    })
+    }), ...[...skipped].map(([endpoint, reason]) => ({ endpoint, mode: "skipped", reason }))]
 
     const toolRegistration = await ctx.tool.transform(editor => {
       editor.namespace({ name: "custom_api", description: "Custom API endpoint inventory management" })

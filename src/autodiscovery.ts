@@ -5,11 +5,46 @@ import type { AutoOptions, EndpointOptions, ModelMetadata, Protocol } from "./ty
 /** Auto-detected providers re-check their model list this often unless configured otherwise. */
 export const DEFAULT_AUTO_REFRESH_MS = 1_800_000
 
+/**
+ * Provider runtimes whose model list this plugin knows how to read. The value only selects
+ * how the list request is authenticated; the provider's own runtime is never changed.
+ */
 const PACKAGES: Record<string, Protocol> = {
   "@opencode/ai/providers/openai-compatible": "openai-compatible",
+  "@opencode/ai/providers/openai-compatible/responses": "openai-compatible",
+  "@opencode/ai/providers/openai-compatible-responses": "openai-compatible",
   "@opencode/ai/providers/openai": "openai-compatible",
+  "@opencode/ai/providers/openai/chat": "openai-compatible",
+  "@opencode/ai/providers/openai/responses": "openai-compatible",
+  "@opencode/ai/providers/anthropic": "anthropic-compatible",
   "@opencode/ai/providers/anthropic-compatible": "anthropic-compatible",
+  "aisdk:@ai-sdk/openai-compatible": "openai-compatible",
   "aisdk:@ai-sdk/openai": "openai-compatible",
+  "aisdk:@ai-sdk/anthropic": "anthropic-compatible",
+}
+
+/** Providers OpenCode ships itself. Their inventories belong to the host catalog and are left alone. */
+const BUILTIN_IDS = new Set([
+  "opencode", "opencode-go", "anthropic", "openai", "google", "google-vertex", "github-copilot", "claude-agent",
+  "amazon-bedrock", "azure", "openrouter", "mistral", "gitlab",
+])
+
+type ProviderShape = { provider: Pick<Provider.Info, "id"> & { canonical?: string | undefined }; models: ReadonlyMap<string, Model.Info> }
+
+/**
+ * True when a provider comes from OpenCode's bundled catalog rather than from the user's own configuration.
+ * Catalog models carry catalog-only facts (family, release date, pricing); models a user
+ * types into a custom provider do not. A custom provider that points `canonical` at another provider inherits
+ * such facts on purpose and is still treated as custom.
+ */
+export function looksBuiltin(record: ProviderShape): boolean {
+  const { provider, models } = record
+  if (BUILTIN_IDS.has(provider.id)) return true
+  if (provider.canonical && provider.canonical !== provider.id) return false
+  for (const model of models.values()) {
+    if (model.family || (model.cost?.length ?? 0) > 0 || (model.time?.released ?? 0) > 0) return true
+  }
+  return false
 }
 
 export interface AutoEndpoint {
@@ -82,8 +117,21 @@ export function credentialSecret(value: unknown, fallback?: string): string | un
   return fallback || undefined
 }
 
+/** How a configured model is reached. Discovery fills in metadata only and never rewrites these. */
+const ROUTE_FIELDS = ["package", "settings", "headers", "body", "compatibility", "canonical"] as const
+
+export function keepRoute(discovered: Model.Info, existing?: Model.Info): Model.Info {
+  if (!existing) return discovered
+  const next: Record<string, unknown> = { ...discovered }
+  for (const field of ROUTE_FIELDS) {
+    if (existing[field] !== undefined) next[field] = existing[field]
+    else delete next[field]
+  }
+  return next as unknown as Model.Info
+}
+
 export function mergeDiscoveredModels(discovered: readonly Model.Info[], existing: ReadonlyMap<string, Model.Info>): Model.Info[] {
   const merged = new Map(existing)
-  for (const model of discovered) merged.set(model.id, model)
+  for (const model of discovered) merged.set(model.id, keepRoute(model, existing.get(model.id)))
   return [...merged.values()]
 }

@@ -54,6 +54,10 @@ export interface AutoOptions {
   include?: string[]
   exclude?: string[]
   pruneMissing?: boolean
+  /** Also discover providers that OpenCode ships itself (OpenCode Zen, Go, OpenAI, ...). Off by default. */
+  builtin?: boolean
+  /** When present, only these provider IDs are auto-discovered. */
+  providers?: string[]
 }
 export interface PluginOptions { endpoints: EndpointOptions[]; auto?: AutoOptions }
 export interface DiscoveredModel {
