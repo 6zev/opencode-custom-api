@@ -258,6 +258,27 @@ export default Plugin.define({
     }
     let providerRegistration = await ctx.provider.transform(applyProviders)
 
+    /**
+     * Models written in the config are layered on top of the provider inventory by the host, so replacing
+     * the inventory alone leaves a placeholder behind. This removes whatever a pruned provider does not list.
+     */
+    const pruneModels = (editor: Parameters<Parameters<typeof ctx.model.transform>[0]>[0]) => {
+      for (const source of automatic.values()) {
+        const id = source.endpoint.id
+        if (source.endpoint.pruneMissing !== true || kinds.get(id) === "builtin" || source.stale || source.models.length === 0) continue
+        const listed = new Set(source.models.map(model => model.id))
+        // A fault here must never break the host's model list, so an unexpected editor is left untouched.
+        const current = typeof editor?.list === "function" ? editor.list(id) : undefined
+        if (!Array.isArray(current) || typeof editor.remove !== "function") continue
+        for (const model of current) {
+          const modelID = String((model as { modelID?: unknown }).modelID ?? model.id)
+          if (!listed.has(String(model.id)) && !listed.has(modelID)) editor.remove(id, String(model.id))
+        }
+      }
+    }
+    const modelDomain = (ctx as { model?: Context["model"] }).model
+    let modelRegistration = modelDomain?.transform ? await modelDomain.transform(pruneModels) : undefined
+
     const registerAtTail = async () => {
       if (lifecycle.signal.aborted) return
       const nextProviderRegistration = await ctx.provider.transform(applyProviders)
@@ -265,6 +286,14 @@ export default Plugin.define({
       const previousProviderRegistration = providerRegistration
       providerRegistration = nextProviderRegistration
       await previousProviderRegistration.dispose()
+      // The model overlay reads the inventories above, so it is registered again (not reloaded) to be folded after them.
+      if (modelRegistration && modelDomain) {
+        const next = await modelDomain.transform(pruneModels)
+        if (lifecycle.signal.aborted) return next.dispose()
+        const previous = modelRegistration
+        modelRegistration = next
+        await previous.dispose()
+      }
     }
 
     const reconcile = async () => {
@@ -478,12 +507,19 @@ export default Plugin.define({
     forceReconcile = true
     await reconcile()
 
+    // A workspace that is still loading its config when the plugin starts lists no providers yet, and the
+    // host does not always announce them afterwards. Looking again costs one registry read when nothing changed.
+    const recheck: ReturnType<typeof setTimeout>[] = [5_000, 30_000].map(delay => setTimeout(() => scheduleReconcile(), delay))
+    recheck.push(setInterval(() => scheduleReconcile(), 300_000))
+    for (const timer of recheck) (timer as { unref?: () => void }).unref?.()
+
     return async () => {
       lifecycle.abort()
+      for (const timer of recheck) clearTimeout(timer)
       for (const entry of timers.values()) clearInterval(entry.timer)
       timers.clear()
       controllers.forEach(controller => controller.abort())
-      await Promise.all([providerRegistration.dispose(), toolRegistration.dispose(), commandRegistration.dispose(), eventTask, queue])
+      await Promise.all([providerRegistration.dispose(), modelRegistration?.dispose(), toolRegistration.dispose(), commandRegistration.dispose(), eventTask, queue])
     }
   },
 })

@@ -112,3 +112,42 @@ describe("automatic operation", () => {
     await cleanupOff?.()
   })
 })
+
+describe("host-side overlays", () => {
+  it("removes a config placeholder the host layers on top of the inventory", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respond("a", "b")))
+    const { ctx } = host({ modelsDiscovery: { refreshIntervalMs: 0 } })
+    // The host keeps config models as overrides: they survive models.set and are appended after the inventory.
+    const overlay = ["placeholder", "a"]
+    const transforms: ((editor: any) => void)[] = []
+    const visible = () => {
+      const ids = ["a", "b", ...overlay.filter(id => id !== "a")]
+      const removed = new Set<string>()
+      for (const transform of transforms) transform({ list: () => ids.map(id => ({ id, modelID: id })), remove: (_: string, id: string) => removed.add(id) })
+      return ids.filter(id => !removed.has(id))
+    }
+    const reload = vi.fn(async () => {})
+    ;(ctx as any).model = { transform: vi.fn(async (callback: any) => { transforms.push(callback); return { dispose: async () => { transforms.splice(transforms.indexOf(callback), 1) } } }), reload }
+    const cleanup = await plugin.setup(ctx as never)
+    expect(visible()).toEqual(["a", "b"])
+    expect(transforms).toHaveLength(1)
+    expect(reload).not.toHaveBeenCalled()
+    await (cleanup as () => Promise<void>)()
+  })
+
+  it("looks at the provider registry again when a workspace lists its providers late", async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn(async () => respond("a"))
+    vi.stubGlobal("fetch", fetcher)
+    const { ctx, ids, provider } = host({ modelsDiscovery: { refreshIntervalMs: 0 } })
+    const real = provider.list.getMockImplementation()!
+    let ready = false
+    provider.list.mockImplementation(async () => ready ? real() : { location: {}, data: [] })
+    const cleanup = await plugin.setup(ctx as never)
+    expect(fetcher).not.toHaveBeenCalled()
+    ready = true
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(ids()).toEqual(["a"])
+    await (cleanup as () => Promise<void>)()
+  })
+})
